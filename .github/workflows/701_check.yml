@@ -1,0 +1,31 @@
+name: Run 701 Check with HAP
+
+on:
+  schedule:
+    - cron: '*/15 4-22 * * *'     # Every 15 mins from 5:00 AM to 10:45 PM BST (4–22 UTC)
+    - cron: '0,15,30,45 23 * * *' # 11:00–11:45 PM BST (23 UTC)
+  workflow_dispatch:              # Manual trigger from the GitHub UI
+
+jobs:
+  run-check:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build project
+        run: dotnet build --configuration Release
+
+      - name: Run 701_check
+        run: |
+          cd 701_check/bin/Release/net8.0
+          DISCORD_WEBHOOK=${{ secrets.DISCORD_WEBHOOK }} ./701_check.exe
