@@ -12,8 +12,10 @@ namespace SWR701Tracker
     {
         // === Configuration ===
         static readonly string BASE_URL = "https://www.realtimetrains.co.uk/search/handler";
-        static readonly string SERVICE_URL = "https://www.realtimetrains.co.uk";
-        static readonly string DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1371225525724643328/HXseR7vHaO_BaH68nqEtDfI-qlS4n5KXhSR-03uGfJygW_IhV0EWdhn5v1BLFCDALBk3";
+        static readonly string SERVICE_URL = "https://www.realtimetrains.co.uk"; 
+        static readonly string DISCORD_WEBHOOK_URL = Environment.GetEnvironmentVariable("DISCORD_WEBHOOK")
+    ?? throw new InvalidOperationException("DISCORD_WEBHOOK not set.");
+
         //https://discord.com/api/webhooks/1360001654728036373/wJLtl3hSuZTfUqEs2yfDwI-M4byBNOk2Re-oe5-YpmBNQEEMR3d7yxCtYdxRI8azs_1w //testing
         //https://discord.com/api/webhooks/1371225525724643328/HXseR7vHaO_BaH68nqEtDfI-qlS4n5KXhSR-03uGfJygW_IhV0EWdhn5v1BLFCDALBk3 //release
 
@@ -22,7 +24,7 @@ namespace SWR701Tracker
             {"2U", "Windsor"}, {"1U", "Windsor"}, {"1J", "Hampton Court" }, {"2J", "Hampton Court"}, {"2H", "Shepperton"},
             {"1H", "Shepperton"}, {"2K", "Kingston Loop via Wimbledon"}, {"2O", "Kingston Loop via Richmond"},
             {"2C", "Reading"}, {"1C", "Reading"}, {"2V", "Hounslow Loop via Hounslow"}, {"2R", "Hounslow Loop via Richmond"},
-            {"2S", "Weybridge"}, {"2G", "Guildford via Cobham"}, {"2D", "Guildford via Epsom"},
+            {"2S", "Weybridge"}, {"1S", "Weybridge"}, {"2G", "Guildford via Cobham"}, {"2D", "Guildford via Epsom"},
             {"2F", "Woking"}, {"2M", "Chessington South"}, {"1D", "Dorking"}
         };
 
@@ -57,7 +59,6 @@ namespace SWR701Tracker
         static string GetLineFromHeadcode(string headcode)
         {
             if (string.IsNullOrEmpty(headcode)) return "Depot";
-            if (headcode.StartsWith("1Z")) return "Ascot Special";
             return HEADCODE_TO_LINE.TryGetValue(headcode[..2], out var line) ? line : "Depot";
         }
 
