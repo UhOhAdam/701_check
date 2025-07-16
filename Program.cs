@@ -16,9 +16,6 @@ namespace SWR701Tracker
         static readonly string DISCORD_WEBHOOK_URL = Environment.GetEnvironmentVariable("DISCORD_WEBHOOK")
     ?? throw new InvalidOperationException("DISCORD_WEBHOOK not set.");
 
-        //https://discord.com/api/webhooks/1360001654728036373/wJLtl3hSuZTfUqEs2yfDwI-M4byBNOk2Re-oe5-YpmBNQEEMR3d7yxCtYdxRI8azs_1w //testing
-        //https://discord.com/api/webhooks/1371225525724643328/HXseR7vHaO_BaH68nqEtDfI-qlS4n5KXhSR-03uGfJygW_IhV0EWdhn5v1BLFCDALBk3 //release
-
         static readonly Dictionary<string, string> HEADCODE_TO_LINE = new()
         {
             {"2U", "Windsor"}, {"1U", "Windsor"}, {"1J", "Hampton Court" }, {"2J", "Hampton Court"}, {"2H", "Shepperton"},
@@ -242,7 +239,7 @@ namespace SWR701Tracker
                 }
             }
 
-            var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            var now = DateTime.UtcNow.AddHours(1).ToString("yyyy-MM-dd HH:mm:ss");
             int total701 = inService701.Values.Sum(v => v.Count) + depot701.Count + testing701.Count;
             // Count individual units by splitting formations on '+'
             int total458 = inService458.Values.Sum(v => v.Sum(f => f.Split('+').Length)) + 
