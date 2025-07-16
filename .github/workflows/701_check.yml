@@ -27,5 +27,5 @@ jobs:
 
       - name: Run 701_check
         run: |
-          cd bin/Release/net8.0
-          DISCORD_WEBHOOK=${{ secrets.DISCORD_WEBHOOK }} ./701_check.exe
+          $env:DISCORD_WEBHOOK = "${{ secrets.DISCORD_WEBHOOK }}"
+          ./bin/Release/net8.0/701_check.exe
