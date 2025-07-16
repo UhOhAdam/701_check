@@ -1,0 +1,310 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
+using HtmlAgilityPack;
+using System.Text.Json;
+
+namespace SWR701Tracker
+{
+    class Program
+    {
+        // === Configuration ===
+        static readonly string BASE_URL = "https://www.realtimetrains.co.uk/search/handler";
+        static readonly string SERVICE_URL = "https://www.realtimetrains.co.uk";
+        static readonly string DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1371225525724643328/HXseR7vHaO_BaH68nqEtDfI-qlS4n5KXhSR-03uGfJygW_IhV0EWdhn5v1BLFCDALBk3";
+        //https://discord.com/api/webhooks/1360001654728036373/wJLtl3hSuZTfUqEs2yfDwI-M4byBNOk2Re-oe5-YpmBNQEEMR3d7yxCtYdxRI8azs_1w //testing
+        //https://discord.com/api/webhooks/1371225525724643328/HXseR7vHaO_BaH68nqEtDfI-qlS4n5KXhSR-03uGfJygW_IhV0EWdhn5v1BLFCDALBk3 //release
+
+        static readonly Dictionary<string, string> HEADCODE_TO_LINE = new()
+        {
+            {"2U", "Windsor"}, {"1U", "Windsor"}, {"1J", "Hampton Court" }, {"2J", "Hampton Court"}, {"2H", "Shepperton"},
+            {"1H", "Shepperton"}, {"2K", "Kingston Loop via Wimbledon"}, {"2O", "Kingston Loop via Richmond"},
+            {"2C", "Reading"}, {"1C", "Reading"}, {"2V", "Hounslow Loop via Hounslow"}, {"2R", "Hounslow Loop via Richmond"},
+            {"2S", "Weybridge"}, {"2G", "Guildford via Cobham"}, {"2D", "Guildford via Epsom"},
+            {"2F", "Woking"}, {"2M", "Chessington South"}, {"1D", "Dorking"}
+        };
+
+        static readonly string[] ACTIVE_4585_UNITS = { "458529", "458530", "458533", "458535", "458536" };
+
+        static async Task Main(string[] args)
+        {
+            var handler = new HttpClientHandler { AllowAutoRedirect = false };
+            using var client = new HttpClient(handler);
+
+            var tasks701 = Enumerable.Range(1, 60)
+                .Select(i => Check701Async(client, $"701{i:D3}")).ToArray();
+            var results701 = await Task.WhenAll(tasks701);
+            var nonNullableResults701 = results701
+                .Select(r => (r.unit, r.status, r.headcode ?? string.Empty, r.identity ?? string.Empty, r.reversal ?? string.Empty))
+                .ToArray();
+
+            var seen = new HashSet<string>();
+            var tasks458 = ACTIVE_4585_UNITS.Select(u => Check458Async(client, u, seen)).ToArray();
+            var results458 = await Task.WhenAll(tasks458);
+
+            await NotifyDiscord(nonNullableResults701, results458);
+        }
+
+        static string ClassifyUnit(string? headcode)
+        {
+            if (!string.IsNullOrEmpty(headcode) && (headcode.StartsWith("5Q") || headcode.StartsWith("5T")))
+                return "testing";
+            return "in_service";
+        }
+
+        static string GetLineFromHeadcode(string headcode)
+        {
+            if (string.IsNullOrEmpty(headcode)) return "Depot";
+            if (headcode.StartsWith("1Z")) return "Ascot Special";
+            return HEADCODE_TO_LINE.TryGetValue(headcode[..2], out var line) ? line : "Depot";
+        }
+
+        // === 701s: one identity + possible reversal ===
+        static async Task<(string unit, string status, string? headcode, string? identity, string? reversal)>
+        Check701Async(HttpClient client, string unitNumber)
+
+        {
+            try
+            {
+                var url = $"{BASE_URL}?qsearch={unitNumber}&type=detailed";
+                using var resp = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                if ((int)resp.StatusCode == 302 && resp.Headers.Location?.ToString().StartsWith("/service/") == true)
+                {
+                    var serviceUrl = SERVICE_URL + resp.Headers.Location.ToString();
+                    var (headcode, identities, reversal) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: false);
+                    var identity = identities.FirstOrDefault() ?? unitNumber;
+                    var status = ClassifyUnit(headcode);
+                    return (unitNumber, status, headcode, identity, reversal);
+                }
+                return (unitNumber, "not_running", null, null, null);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"701 {unitNumber}: Error - {e.Message}");
+                return (unitNumber, "error", null, null, null);
+            }
+        }
+
+        // === 458s: multiple identities + reversal ===
+        static async Task<(string formation, string status, string headcode, string reversal)?> Check458Async(HttpClient client, string unitNumber, HashSet<string> seen)
+        {
+            if (seen.Contains(unitNumber)) return null;
+
+            try
+            {
+                var url = $"{BASE_URL}?qsearch={unitNumber}&type=detailed";
+                using var resp = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                if ((int)resp.StatusCode == 302 && resp.Headers.Location?.ToString().StartsWith("/service/") == true)
+                {
+                    var serviceUrl = SERVICE_URL + resp.Headers.Location.ToString();
+                    var (headcode, identities, reversal) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: true);
+                    var clean = SquashReversal(identities ?? new List<string>());
+                    var formation = string.Join("+", clean);
+                    var status = ClassifyUnit(headcode);
+                    foreach (var id in identities ?? Enumerable.Empty<string>()) seen.Add(id);
+
+                    // Ensure non-null values for headcode and reversal
+                    return (formation, status, headcode ?? string.Empty, reversal ?? string.Empty);
+                }
+                return null;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"458 {unitNumber}: Error - {e.Message}");
+                return null;
+            }
+        }
+
+        // === Extract headcode, identities, and reversal station ===
+        static async Task<(string? headcode, List<string> identities, string? reversal)>
+        FetchHeadcodeAndIdentities(HttpClient client, string serviceUrl, bool is458)
+
+        {
+            try
+            {
+                var resp = await client.GetAsync(serviceUrl);
+                var html = await resp.Content.ReadAsStringAsync();
+                var doc = new HtmlDocument();
+                doc.LoadHtml(html);
+
+                var header = doc.DocumentNode.SelectSingleNode("//div[@class='header']");
+                var headcode = header?.InnerText?.Trim()?.Split(' ').FirstOrDefault();
+
+                List<string> identities = new();
+                if (is458)
+                {
+                    identities = doc.DocumentNode
+                        .SelectNodes("//div[@class='unit']//span[@class='identity']")
+                        ?.Select(n => n.InnerText.Trim())
+                        .ToList() ?? new List<string>();
+                }
+                else
+                {
+                    var span = doc.DocumentNode.SelectSingleNode("//div[@class='identity']//span[@class='identity']");
+                    if (span != null) identities.Add(span.InnerText.Trim());
+                }
+
+                string? reversalStation = null;
+                var addls = doc.DocumentNode.SelectNodes("//div[@class='addl']");
+                if (addls != null)
+                {
+                    foreach (var addl in addls)
+                    {
+                        if (addl.InnerText.Contains("Service reverses here"))
+                        {
+                            var prevA = addl.SelectSingleNode("preceding-sibling::a[@class='name']");
+                            if (prevA != null)
+                            {
+                                var raw = prevA.InnerText.Trim();
+                                reversalStation = raw.Split(" [")[0];
+                            }
+                            break;
+                        }
+                    }
+                }
+                return (headcode, identities, reversalStation);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Error fetching RTT data from {serviceUrl}: {e.Message}");
+                return (null, new List<string>(), null);
+            }
+        }
+
+        // === Helper to squash mirror reversals ===
+        static List<string> SquashReversal(List<string> units)
+        {
+            int n = units.Count;
+            if (n % 2 == 0)
+            {
+                int half = n / 2;
+                if (Enumerable.SequenceEqual(units.Take(half), units.Skip(half).Reverse()))
+                    return units.Take(half).ToList();
+            }
+            return units;
+        }
+
+        // === Format & send Discord message ===
+        static async Task NotifyDiscord(
+            (string unit, string status, string headcode, string identity, string reversal)[] results701,
+            (string formation, string status, string headcode, string reversal)?[] results458)
+        {
+            var inService701 = new Dictionary<string, List<string>>();
+            var depot701 = new List<string>();
+            var testing701 = new List<string>();
+
+            foreach (var (unit, status, headcode, identity, reversal) in results701)
+            {
+                var identityStr = identity ?? unit;
+                var headcodeStr = !string.IsNullOrEmpty(headcode) ? $" ({headcode})" : "";
+                var part = $"{identityStr}{headcodeStr}";
+                var label = string.IsNullOrEmpty(reversal) ? part : $"{part} – reverses at {reversal}";
+
+                if (status == "in_service")
+                {
+                    var line = GetLineFromHeadcode(headcode);
+                    if (line == "Depot") depot701.Add(label);
+                    else
+                    {
+                        if (!inService701.ContainsKey(line)) inService701[line] = new List<string>();
+                        inService701[line].Add(label);
+                    }
+                }
+                else if (status == "testing")
+                    testing701.Add(label);
+            }
+
+            var inService458 = new Dictionary<string, HashSet<string>>();
+            var depot458 = new HashSet<string>();
+            var seenForm = new HashSet<string>();
+            foreach (var r in results458)
+            {
+                if (r == null) continue;
+                var (formation, status, headcode, reversal) = r.Value;
+                if (status == "in_service" && seenForm.Add(formation))
+                {
+                    var label = string.IsNullOrEmpty(reversal)
+                        ? $"{formation} ({headcode})"
+                        : $"{formation} ({headcode}) – reverses at {reversal}";
+                    var line = GetLineFromHeadcode(headcode);
+                    if (line == "Depot")
+                    {
+                        depot458.Add(label);
+                    }
+                    else
+                    {
+                        if (!inService458.ContainsKey(line)) inService458[line] = new HashSet<string>();
+                        inService458[line].Add(label);
+                    }
+                }
+            }
+
+            var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            int total701 = inService701.Values.Sum(v => v.Count) + depot701.Count + testing701.Count;
+            // Count individual units by splitting formations on '+'
+            int total458 = inService458.Values.Sum(v => v.Sum(f => f.Split('+').Length)) + 
+                          depot458.Sum(f => f.Split('+').Length);
+
+            var content = "🛤️ **SWR Fleet Report**\n";
+            content += $"**701s:** {total701}/60 active — {now}\n\n";
+
+            if (inService701.Any())
+            {
+                content += $"🟢 **In service ({inService701.Values.Sum(v => v.Count)}):**\n";
+                foreach (var (line, labels) in inService701.OrderBy(x => x.Key))
+                {
+                    var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
+                    var revs = labels.Where(l => l.Contains("reverses at")).ToList();
+
+                    content += normals.Any()
+                        ? $"**{line} ({labels.Count})** – {string.Join(", ", normals)}\n"
+                        : $"**{line} ({labels.Count})**\n";
+                    foreach (var r in revs)
+                        content += $"   – {r}\n";
+                }
+                content += "\n";
+            }
+            if (depot701.Any()) content += $"🏠 **Depot ({depot701.Count}):** {string.Join(", ", depot701)}\n\n";
+            if (testing701.Any()) content += $"🛠️ **Testing ({testing701.Count}):** {string.Join(", ", testing701)}\n\n";
+
+            var inService458Count = inService458.Values.Sum(v => v.Sum(f => f.Split('+').Length));
+            content += $"🚆 **458/5s in service ({inService458Count}):**\n";
+            if (inService458.Any())
+            {
+                foreach (var (line, labels) in inService458.OrderBy(x => x.Key))
+                {
+                    var lineUnitCount = labels.Sum(f => f.Split('+').Length);
+                    var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
+                    var revs = labels.Where(l => l.Contains("reverses at")).ToList();
+                    content += normals.Any()
+                        ? $"**{line} ({lineUnitCount})** – {string.Join(", ", normals)}\n"
+                        : $"**{line} ({lineUnitCount})**\n";
+                    foreach (var r in revs)
+                        content += $"   – {r}\n";
+                }
+                content += "\n";
+            }
+            else content += "None running today.\n";
+
+            if (depot458.Any())
+            {
+                var depotUnitCount = depot458.Sum(f => f.Split('+').Length);
+                content += $"🏠 **Depot ({depotUnitCount}):** {string.Join(", ", depot458)}\n";
+            }
+
+            content += "_Powered by SWR Unit Tracker (Beta)_";
+
+            Console.WriteLine("\n" + content);
+
+            // Send to Discord
+            using var client = new HttpClient();
+            var payload = new { content };
+            var json = JsonSerializer.Serialize(payload);
+            var resp = await client.PostAsync(DISCORD_WEBHOOK_URL,
+                new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
+            resp.EnsureSuccessStatusCode();
+        }
+    }
+}
