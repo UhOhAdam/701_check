@@ -292,7 +292,7 @@ namespace SWR701Tracker
                 content += $"🏠 **Depot ({depotUnitCount}):** {string.Join(", ", depot458)}\n";
             }
 
-            content += "_Powered by SWR Unit Tracker (Beta)_";
+            content += "_Powered by SWR Unit Tracker (Beta) v1.6.0_";
 
             Console.WriteLine("\n" + content);
 
