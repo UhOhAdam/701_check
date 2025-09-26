@@ -59,6 +59,29 @@ namespace SWR701Tracker
             return HEADCODE_TO_LINE.TryGetValue(headcode[..2], out var line) ? line : "Depot";
         }
 
+        static string GetAnsiColor(string statusColor)
+        {
+            return statusColor switch
+            {
+                "LimeGreen" => "\u001b[32m",    // Green for on-time
+                "DeepSkyBlue" => "\u001b[36m",  // Cyan for early
+                "Orange" => "\u001b[33m",       // Yellow for minor delays
+                "Red" => "\u001b[31m",          // Red for major delays
+                "Gray" => "\u001b[37m",         // White for unknown
+                _ => "\u001b[37m"               // Default to white
+            };
+        }
+
+        static string ColorizeStatus(string statusIndicator, string statusColor)
+        {
+            if (string.IsNullOrEmpty(statusIndicator) || statusIndicator == "●")
+                return "";
+
+            var ansiColor = GetAnsiColor(statusColor);
+            var resetColor = "\u001b[0m";
+            return $" {ansiColor}{statusIndicator}{resetColor}";
+        }
+
         // === 701s: one identity + possible reversal + status ===
         static async Task<(string unit, string status, string? headcode, string? identity, string? reversal, string statusIndicator, string statusColor)>
         Check701Async(HttpClient client, string unitNumber)
@@ -274,7 +297,7 @@ namespace SWR701Tracker
             {
                 var identityStr = identity ?? unit;
                 var headcodeStr = !string.IsNullOrEmpty(headcode) ? $" ({headcode})" : "";
-                var statusStr = !string.IsNullOrEmpty(statusIndicator) && statusIndicator != "●" ? $" {statusIndicator}" : "";
+                var statusStr = ColorizeStatus(statusIndicator, statusColor);
                 var part = $"{identityStr}{headcodeStr}{statusStr}";
                 var label = string.IsNullOrEmpty(reversal) ? part : $"{part} – reverses at {reversal}";
 
@@ -301,7 +324,7 @@ namespace SWR701Tracker
                 var (formation, status, headcode, reversal, statusIndicator, statusColor) = r.Value;
                 if (status == "in_service" && seenForm.Add(formation))
                 {
-                    var statusStr = !string.IsNullOrEmpty(statusIndicator) && statusIndicator != "●" ? $" {statusIndicator}" : "";
+                    var statusStr = ColorizeStatus(statusIndicator, statusColor);
                     var label = string.IsNullOrEmpty(reversal)
                         ? $"{formation} ({headcode}){statusStr}"
                         : $"{formation} ({headcode}){statusStr} – reverses at {reversal}";
@@ -324,30 +347,30 @@ namespace SWR701Tracker
             int total458 = inService458.Values.Sum(v => v.Sum(f => f.Split('+').Length)) + 
                           depot458.Sum(f => f.Split('+').Length);
 
-            var content = "🛤️ **SWR Fleet Report**\n";
-            content += $"**701s:** {total701}/60 active — {now}\n\n";
+            var content = "```ansi\n🛤️ SWR Fleet Report\n";
+            content += $"701s: {total701}/60 active — {now}\n\n";
 
             if (inService701.Any())
             {
-                content += $"🟢 **In service ({inService701.Values.Sum(v => v.Count)}):**\n";
+                content += $"🟢 In service ({inService701.Values.Sum(v => v.Count)}):\n";
                 foreach (var (line, labels) in inService701.OrderBy(x => x.Key))
                 {
                     var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
                     var revs = labels.Where(l => l.Contains("reverses at")).ToList();
 
                     content += normals.Any()
-                        ? $"**{line} ({labels.Count})** – {string.Join(", ", normals)}\n"
-                        : $"**{line} ({labels.Count})**\n";
+                        ? $"{line} ({labels.Count}) – {string.Join(", ", normals)}\n"
+                        : $"{line} ({labels.Count})\n";
                     foreach (var r in revs)
                         content += $"   – {r}\n";
                 }
                 content += "\n";
             }
-            if (depot701.Any()) content += $"🏠 **Depot ({depot701.Count}):** {string.Join(", ", depot701)}\n\n";
-            if (testing701.Any()) content += $"🛠️ **Testing ({testing701.Count}):** {string.Join(", ", testing701)}\n\n";
+            if (depot701.Any()) content += $"🏠 Depot ({depot701.Count}): {string.Join(", ", depot701)}\n\n";
+            if (testing701.Any()) content += $"🛠️ Testing ({testing701.Count}): {string.Join(", ", testing701)}\n\n";
 
             var inService458Count = inService458.Values.Sum(v => v.Sum(f => f.Split('+').Length));
-            content += $"🚆 **458/5s in service ({inService458Count}):**\n";
+            content += $"🚆 458/5s in service ({inService458Count}):\n";
             if (inService458.Any())
             {
                 foreach (var (line, labels) in inService458.OrderBy(x => x.Key))
@@ -356,8 +379,8 @@ namespace SWR701Tracker
                     var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
                     var revs = labels.Where(l => l.Contains("reverses at")).ToList();
                     content += normals.Any()
-                        ? $"**{line} ({lineUnitCount})** – {string.Join(", ", normals)}\n"
-                        : $"**{line} ({lineUnitCount})**\n";
+                        ? $"{line} ({lineUnitCount}) – {string.Join(", ", normals)}\n"
+                        : $"{line} ({lineUnitCount})\n";
                     foreach (var r in revs)
                         content += $"   – {r}\n";
                 }
@@ -368,10 +391,10 @@ namespace SWR701Tracker
             if (depot458.Any())
             {
                 var depotUnitCount = depot458.Sum(f => f.Split('+').Length);
-                content += $"🏠 **Depot ({depotUnitCount}):** {string.Join(", ", depot458)}\n";
+                content += $"🏠 Depot ({depotUnitCount}): {string.Join(", ", depot458)}\n";
             }
 
-            content += "_Powered by SWR Unit Tracker (Beta) v1.6.0_";
+            content += "Powered by SWR Unit Tracker (Beta) v1.6.0\n```";
 
             Console.WriteLine("\n" + content);
 
