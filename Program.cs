@@ -361,19 +361,34 @@ namespace SWR701Tracker
                 content += $"🟢 In service ({inService701.Values.Sum(v => v.Count)}):\n";
                 foreach (var (line, labels) in inService701.OrderBy(x => x.Key))
                 {
+                    content += $"{line} ({labels.Count}):\n";
+
                     var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
                     var revs = labels.Where(l => l.Contains("reverses at")).ToList();
 
-                    content += normals.Any()
-                        ? $"{line} ({labels.Count}) – {string.Join(", ", normals)}\n"
-                        : $"{line} ({labels.Count})\n";
-                    foreach (var r in revs)
-                        content += $"   – {r}\n";
+                    foreach (var normal in normals)
+                        content += $"  {normal}\n";
+                    foreach (var rev in revs)
+                        content += $"  {rev}\n";
+
+                    content += "\n"; // Line break between destinations
                 }
                 content += "\n";
             }
-            if (depot701.Any()) content += $"🏠 Depot ({depot701.Count}): {string.Join(", ", depot701)}\n\n";
-            if (testing701.Any()) content += $"🛠️ Testing ({testing701.Count}): {string.Join(", ", testing701)}\n\n";
+            if (depot701.Any())
+            {
+                content += $"🏠 Depot ({depot701.Count}):\n";
+                foreach (var unit in depot701)
+                    content += $"  {unit}\n";
+                content += "\n";
+            }
+            if (testing701.Any())
+            {
+                content += $"🛠️ Testing ({testing701.Count}):\n";
+                foreach (var unit in testing701)
+                    content += $"  {unit}\n";
+                content += "\n";
+            }
 
             var inService458Count = inService458.Values.Sum(v => v.Sum(f => f.Split('+').Length));
             content += $"🚆 458/5s in service ({inService458Count}):\n";
@@ -382,13 +397,17 @@ namespace SWR701Tracker
                 foreach (var (line, labels) in inService458.OrderBy(x => x.Key))
                 {
                     var lineUnitCount = labels.Sum(f => f.Split('+').Length);
+                    content += $"{line} ({lineUnitCount}):\n";
+
                     var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
                     var revs = labels.Where(l => l.Contains("reverses at")).ToList();
-                    content += normals.Any()
-                        ? $"{line} ({lineUnitCount}) – {string.Join(", ", normals)}\n"
-                        : $"{line} ({lineUnitCount})\n";
-                    foreach (var r in revs)
-                        content += $"   – {r}\n";
+
+                    foreach (var normal in normals)
+                        content += $"  {normal}\n";
+                    foreach (var rev in revs)
+                        content += $"  {rev}\n";
+
+                    content += "\n"; // Line break between destinations
                 }
                 content += "\n";
             }
@@ -397,7 +416,10 @@ namespace SWR701Tracker
             if (depot458.Any())
             {
                 var depotUnitCount = depot458.Sum(f => f.Split('+').Length);
-                content += $"🏠 Depot ({depotUnitCount}): {string.Join(", ", depot458)}\n";
+                content += $"🏠 Depot ({depotUnitCount}):\n";
+                foreach (var unit in depot458)
+                    content += $"  {unit}\n";
+                content += "\n";
             }
 
             content += "Powered by SWR Unit Tracker (Beta) v1.6.0\n```";
