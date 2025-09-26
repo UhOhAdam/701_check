@@ -505,7 +505,7 @@ namespace SWR701Tracker
                 content += "\n";
             }
 
-            content += "Powered by SWR Unit Tracker (Beta) v1.8.0\n```";
+            content += "\nPowered by SWR Unit Tracker (Beta) v1.8.0\n```";
 
             Console.WriteLine("\n" + content);
 
