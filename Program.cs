@@ -74,8 +74,14 @@ namespace SWR701Tracker
 
         static string ColorizeStatus(string statusIndicator, string statusColor)
         {
-            if (string.IsNullOrEmpty(statusIndicator) || statusIndicator == "●")
+            if (string.IsNullOrEmpty(statusIndicator))
                 return "";
+
+            if (statusIndicator == "●")
+            {
+                // Use emoji circles instead of the bullet character
+                return statusColor == "LimeGreen" ? " 🟢" : " ⚪";
+            }
 
             var ansiColor = GetAnsiColor(statusColor);
             var resetColor = "\u001b[0m";
