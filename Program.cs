@@ -356,8 +356,8 @@ namespace SWR701Tracker
             var now = DateTime.UtcNow.AddHours(1).ToString("yyyy-MM-dd HH:mm:ss");
             int total701 = inService701.Values.Sum(v => v.Count) + depot701.Count + testing701.Count;
             // Count individual units by splitting formations on '+'
-            int total458 = inService458.Values.Sum(v => v.Sum(f => f.Split('+').Length)) + 
-                          depot458.Sum(f => f.Split('+').Length);
+            int total458 = inService458.Values.Sum(v => v.Sum(f => f.Split(' ')[0].Split('+').Length)) +
+                          depot458.Sum(f => f.Split(' ')[0].Split('+').Length);
 
             var content = "```ansi\nSWR Fleet Report\n";
             content += $"701/0s: {total701}/60 active — {now}\n\n";
@@ -396,13 +396,13 @@ namespace SWR701Tracker
                 content += "\n";
             }
 
-            var inService458Count = inService458.Values.Sum(v => v.Sum(f => f.Split('+').Length));
+            var inService458Count = inService458.Values.Sum(v => v.Sum(f => f.Split(' ')[0].Split('+').Length));
             content += $"🚆 458/5s in service ({inService458Count}):\n";
             if (inService458.Any())
             {
                 foreach (var (line, labels) in inService458.OrderBy(x => x.Key))
                 {
-                    var lineUnitCount = labels.Sum(f => f.Split('+').Length);
+                    var lineUnitCount = labels.Sum(f => f.Split(' ')[0].Split('+').Length);
                     content += $"{line} ({lineUnitCount}):\n";
 
                     var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
@@ -421,7 +421,7 @@ namespace SWR701Tracker
 
             if (depot458.Any())
             {
-                var depotUnitCount = depot458.Sum(f => f.Split('+').Length);
+                var depotUnitCount = depot458.Sum(f => f.Split(' ')[0].Split('+').Length);
                 content += $"🏠 Depot ({depotUnitCount}):\n";
                 foreach (var unit in depot458)
                     content += $"• {unit}\n";
@@ -464,13 +464,13 @@ namespace SWR701Tracker
                 }
             }
 
-            var inService7015Count = inService7015.Values.Sum(v => v.Sum(f => f.Split('+').Length));
+            var inService7015Count = inService7015.Values.Sum(v => v.Sum(f => f.Split(' ')[0].Split('+').Length));
             content += $"🚊 701/5s in service ({inService7015Count}):\n";
             if (inService7015.Any())
             {
                 foreach (var (line, labels) in inService7015.OrderBy(x => x.Key))
                 {
-                    var lineUnitCount = labels.Sum(f => f.Split('+').Length);
+                    var lineUnitCount = labels.Sum(f => f.Split(' ')[0].Split('+').Length);
                     content += $"{line} ({lineUnitCount}):\n";
 
                     var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
@@ -489,7 +489,7 @@ namespace SWR701Tracker
 
             if (testing7015.Any())
             {
-                var testingUnitCount = testing7015.Sum(f => f.Split('+').Length);
+                var testingUnitCount = testing7015.Sum(f => f.Split(' ')[0].Split('+').Length);
                 content += $"🛠️ Testing ({testingUnitCount}):\n";
                 foreach (var unit in testing7015)
                     content += $"• {unit}\n";
@@ -498,7 +498,7 @@ namespace SWR701Tracker
 
             if (depot7015.Any())
             {
-                var depotUnitCount = depot7015.Sum(f => f.Split('+').Length);
+                var depotUnitCount = depot7015.Sum(f => f.Split(' ')[0].Split('+').Length);
                 content += $"🏠 Depot ({depotUnitCount}):\n";
                 foreach (var unit in depot7015)
                     content += $"• {unit}\n";
