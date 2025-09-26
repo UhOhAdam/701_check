@@ -26,6 +26,7 @@ namespace SWR701Tracker
         };
 
         static readonly string[] ACTIVE_4585_UNITS = { "458529", "458530", "458533", "458535", "458536" };
+        static readonly string[] ACTIVE_7015_UNITS = Enumerable.Range(501, 30).Select(i => $"701{i}").ToArray();
 
         static async Task Main(string[] args)
         {
@@ -43,7 +44,11 @@ namespace SWR701Tracker
             var tasks458 = ACTIVE_4585_UNITS.Select(u => Check458Async(client, u, seen)).ToArray();
             var results458 = await Task.WhenAll(tasks458);
 
-            await NotifyDiscord(nonNullableResults701, results458);
+            var seen7015 = new HashSet<string>();
+            var tasks7015 = ACTIVE_7015_UNITS.Select(u => Check458Async(client, u, seen7015)).ToArray();
+            var results7015 = await Task.WhenAll(tasks7015);
+
+            await NotifyDiscord(nonNullableResults701, results458, results7015);
         }
 
         static string ClassifyUnit(string? headcode)
@@ -293,7 +298,8 @@ namespace SWR701Tracker
         // === Format & send Discord message ===
         static async Task NotifyDiscord(
             (string unit, string status, string headcode, string identity, string reversal, string statusIndicator, string statusColor)[] results701,
-            (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor)?[] results458)
+            (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor)?[] results458,
+            (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor)?[] results7015)
         {
             var inService701 = new Dictionary<string, List<string>>();
             var depot701 = new List<string>();
@@ -353,8 +359,8 @@ namespace SWR701Tracker
             int total458 = inService458.Values.Sum(v => v.Sum(f => f.Split('+').Length)) + 
                           depot458.Sum(f => f.Split('+').Length);
 
-            var content = "```ansi\n🛤️ SWR Fleet Report\n";
-            content += $"701s: {total701}/60 active — {now}\n\n";
+            var content = "```ansi\nSWR Fleet Report\n";
+            content += $"701/0s: {total701}/60 active — {now}\n\n";
 
             if (inService701.Any())
             {
@@ -367,9 +373,9 @@ namespace SWR701Tracker
                     var revs = labels.Where(l => l.Contains("reverses at")).ToList();
 
                     foreach (var normal in normals)
-                        content += $"  {normal}\n";
+                        content += $"• {normal}\n";
                     foreach (var rev in revs)
-                        content += $"  {rev}\n";
+                        content += $"• {rev}\n";
 
                     content += "\n"; // Line break between destinations
                 }
@@ -379,14 +385,14 @@ namespace SWR701Tracker
             {
                 content += $"🏠 Depot ({depot701.Count}):\n";
                 foreach (var unit in depot701)
-                    content += $"  {unit}\n";
+                    content += $"• {unit}\n";
                 content += "\n";
             }
             if (testing701.Any())
             {
                 content += $"🛠️ Testing ({testing701.Count}):\n";
                 foreach (var unit in testing701)
-                    content += $"  {unit}\n";
+                    content += $"• {unit}\n";
                 content += "\n";
             }
 
@@ -403,9 +409,9 @@ namespace SWR701Tracker
                     var revs = labels.Where(l => l.Contains("reverses at")).ToList();
 
                     foreach (var normal in normals)
-                        content += $"  {normal}\n";
+                        content += $"• {normal}\n";
                     foreach (var rev in revs)
-                        content += $"  {rev}\n";
+                        content += $"• {rev}\n";
 
                     content += "\n"; // Line break between destinations
                 }
@@ -418,11 +424,88 @@ namespace SWR701Tracker
                 var depotUnitCount = depot458.Sum(f => f.Split('+').Length);
                 content += $"🏠 Depot ({depotUnitCount}):\n";
                 foreach (var unit in depot458)
-                    content += $"  {unit}\n";
+                    content += $"• {unit}\n";
                 content += "\n";
             }
 
-            content += "Powered by SWR Unit Tracker (Beta) v1.6.0\n```";
+            // Process 701/5 results
+            var inService7015 = new Dictionary<string, HashSet<string>>();
+            var depot7015 = new HashSet<string>();
+            var testing7015 = new HashSet<string>();
+            var seenForm7015 = new HashSet<string>();
+            foreach (var r in results7015)
+            {
+                if (r == null) continue;
+                var (formation, status, headcode, reversal, statusIndicator, statusColor) = r.Value;
+                if (seenForm7015.Add(formation))
+                {
+                    var statusStr = ColorizeStatus(statusIndicator, statusColor);
+                    var label = string.IsNullOrEmpty(reversal)
+                        ? $"{formation} ({headcode}){statusStr}"
+                        : $"{formation} ({headcode}){statusStr} – reverses at {reversal}";
+
+                    if (status == "in_service")
+                    {
+                        var line = GetLineFromHeadcode(headcode);
+                        if (line == "Depot")
+                        {
+                            depot7015.Add(label);
+                        }
+                        else
+                        {
+                            if (!inService7015.ContainsKey(line)) inService7015[line] = new HashSet<string>();
+                            inService7015[line].Add(label);
+                        }
+                    }
+                    else if (status == "testing")
+                    {
+                        testing7015.Add(label);
+                    }
+                }
+            }
+
+            var inService7015Count = inService7015.Values.Sum(v => v.Sum(f => f.Split('+').Length));
+            content += $"🚊 701/5s in service ({inService7015Count}):\n";
+            if (inService7015.Any())
+            {
+                foreach (var (line, labels) in inService7015.OrderBy(x => x.Key))
+                {
+                    var lineUnitCount = labels.Sum(f => f.Split('+').Length);
+                    content += $"{line} ({lineUnitCount}):\n";
+
+                    var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
+                    var revs = labels.Where(l => l.Contains("reverses at")).ToList();
+
+                    foreach (var normal in normals)
+                        content += $"• {normal}\n";
+                    foreach (var rev in revs)
+                        content += $"• {rev}\n";
+
+                    content += "\n"; // Line break between destinations
+                }
+                content += "\n";
+            }
+            else content += "None running today.\n";
+
+            if (testing7015.Any())
+            {
+                var testingUnitCount = testing7015.Sum(f => f.Split('+').Length);
+                content += $"🛠️ Testing ({testingUnitCount}):\n";
+                foreach (var unit in testing7015)
+                    content += $"• {unit}\n";
+                content += "\n";
+            }
+
+            if (depot7015.Any())
+            {
+                var depotUnitCount = depot7015.Sum(f => f.Split('+').Length);
+                content += $"🏠 Depot ({depotUnitCount}):\n";
+                foreach (var unit in depot7015)
+                    content += $"• {unit}\n";
+                content += "\n";
+            }
+
+            content += "Powered by SWR Unit Tracker (Beta) v1.8.0\n```";
 
             Console.WriteLine("\n" + content);
 
