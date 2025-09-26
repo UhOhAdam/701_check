@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Adam/source/repos/SWR-Unit-Tracker/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

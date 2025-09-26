@@ -36,7 +36,7 @@ namespace SWR701Tracker
                 .Select(i => Check701Async(client, $"701{i:D3}")).ToArray();
             var results701 = await Task.WhenAll(tasks701);
             var nonNullableResults701 = results701
-                .Select(r => (r.unit, r.status, r.headcode ?? string.Empty, r.identity ?? string.Empty, r.reversal ?? string.Empty))
+                .Select(r => (r.unit, r.status, r.headcode ?? string.Empty, r.identity ?? string.Empty, r.reversal ?? string.Empty, r.statusIndicator, r.statusColor))
                 .ToArray();
 
             var seen = new HashSet<string>();
@@ -59,8 +59,8 @@ namespace SWR701Tracker
             return HEADCODE_TO_LINE.TryGetValue(headcode[..2], out var line) ? line : "Depot";
         }
 
-        // === 701s: one identity + possible reversal ===
-        static async Task<(string unit, string status, string? headcode, string? identity, string? reversal)>
+        // === 701s: one identity + possible reversal + status ===
+        static async Task<(string unit, string status, string? headcode, string? identity, string? reversal, string statusIndicator, string statusColor)>
         Check701Async(HttpClient client, string unitNumber)
 
         {
@@ -71,22 +71,22 @@ namespace SWR701Tracker
                 if ((int)resp.StatusCode == 302 && resp.Headers.Location?.ToString().StartsWith("/service/") == true)
                 {
                     var serviceUrl = SERVICE_URL + resp.Headers.Location.ToString();
-                    var (headcode, identities, reversal) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: false);
+                    var (headcode, identities, reversal, statusIndicator, statusColor) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: false);
                     var identity = identities.FirstOrDefault() ?? unitNumber;
                     var status = ClassifyUnit(headcode);
-                    return (unitNumber, status, headcode, identity, reversal);
+                    return (unitNumber, status, headcode, identity, reversal, statusIndicator, statusColor);
                 }
-                return (unitNumber, "not_running", null, null, null);
+                return (unitNumber, "not_running", null, null, null, "●", "Gray");
             }
             catch (Exception e)
             {
                 Console.WriteLine($"701 {unitNumber}: Error - {e.Message}");
-                return (unitNumber, "error", null, null, null);
+                return (unitNumber, "error", null, null, null, "●", "Gray");
             }
         }
 
-        // === 458s: multiple identities + reversal ===
-        static async Task<(string formation, string status, string headcode, string reversal)?> Check458Async(HttpClient client, string unitNumber, HashSet<string> seen)
+        // === 458s: multiple identities + reversal + status ===
+        static async Task<(string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor)?> Check458Async(HttpClient client, string unitNumber, HashSet<string> seen)
         {
             if (seen.Contains(unitNumber)) return null;
 
@@ -97,14 +97,14 @@ namespace SWR701Tracker
                 if ((int)resp.StatusCode == 302 && resp.Headers.Location?.ToString().StartsWith("/service/") == true)
                 {
                     var serviceUrl = SERVICE_URL + resp.Headers.Location.ToString();
-                    var (headcode, identities, reversal) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: true);
+                    var (headcode, identities, reversal, statusIndicator, statusColor) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: true);
                     var clean = SquashReversal(identities ?? new List<string>());
                     var formation = string.Join("+", clean);
                     var status = ClassifyUnit(headcode);
                     foreach (var id in identities ?? Enumerable.Empty<string>()) seen.Add(id);
 
                     // Ensure non-null values for headcode and reversal
-                    return (formation, status, headcode ?? string.Empty, reversal ?? string.Empty);
+                    return (formation, status, headcode ?? string.Empty, reversal ?? string.Empty, statusIndicator, statusColor);
                 }
                 return null;
             }
@@ -115,8 +115,81 @@ namespace SWR701Tracker
             }
         }
 
-        // === Extract headcode, identities, and reversal station ===
-        static async Task<(string? headcode, List<string> identities, string? reversal)>
+        // === Status determination logic ===
+        static (string statusIndicator, string statusColor) DetermineUnitStatus(string pageHtml)
+        {
+            try
+            {
+                var doc = new HtmlDocument();
+                doc.LoadHtml(pageHtml);
+
+                // Parse the timetable to extract delay information
+                var delays = new List<string>();
+                var rows = doc.DocumentNode.SelectNodes("//div[contains(@class,'locationlist')]/div[contains(@class,'location')]");
+
+                if (rows != null)
+                {
+                    foreach (var row in rows)
+                    {
+                        // Get delay information using the same logic as LiveStatusService
+                        var delayNode = row.SelectSingleNode(".//div[contains(@class,'delay')]");
+                        string delay = "";
+
+                        if (delayNode != null && delayNode.GetClasses().Contains("nil"))
+                            delay = "●";
+                        else if (delayNode != null)
+                        {
+                            var span = delayNode.SelectSingleNode(".//span");
+                            delay = span?.InnerText.Trim() ?? delayNode.InnerText.Trim();
+                        }
+
+                        delays.Add(delay);
+                    }
+                }
+
+                // Apply the same status determination logic as LiveStatusPage
+                var nonEmptyDelays = delays.Where(d => !string.IsNullOrWhiteSpace(d)).ToList();
+                if (nonEmptyDelays.Count == 0)
+                {
+                    return ("●", "Gray");
+                }
+
+                string lastDelay = nonEmptyDelays.Last();
+
+                if (lastDelay == "●")
+                {
+                    return ("●", "LimeGreen");
+                }
+                else if (lastDelay.StartsWith("-"))
+                {
+                    return (lastDelay, "DeepSkyBlue");
+                }
+                else if (lastDelay.StartsWith("+"))
+                {
+                    if (int.TryParse(lastDelay.TrimStart('+'), out int minsLate))
+                    {
+                        return (lastDelay, minsLate >= 5 ? "Red" : "Orange");
+                    }
+                    else
+                    {
+                        return (lastDelay, "Gray");
+                    }
+                }
+                else
+                {
+                    return (lastDelay, "Gray");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Fallback to generic status if parsing fails
+                Console.WriteLine($"Error determining status: {ex.Message}");
+                return ("●", "Gray");
+            }
+        }
+
+        // === Extract headcode, identities, reversal station, and status ===
+        static async Task<(string? headcode, List<string> identities, string? reversal, string statusIndicator, string statusColor)>
         FetchHeadcodeAndIdentities(HttpClient client, string serviceUrl, bool is458)
 
         {
@@ -162,12 +235,16 @@ namespace SWR701Tracker
                         }
                     }
                 }
-                return (headcode, identities, reversalStation);
+
+                // Determine unit status from the HTML
+                var (statusIndicator, statusColor) = DetermineUnitStatus(html);
+
+                return (headcode, identities, reversalStation, statusIndicator, statusColor);
             }
             catch (Exception e)
             {
                 Console.WriteLine($"Error fetching RTT data from {serviceUrl}: {e.Message}");
-                return (null, new List<string>(), null);
+                return (null, new List<string>(), null, "●", "Gray");
             }
         }
 
@@ -186,18 +263,19 @@ namespace SWR701Tracker
 
         // === Format & send Discord message ===
         static async Task NotifyDiscord(
-            (string unit, string status, string headcode, string identity, string reversal)[] results701,
-            (string formation, string status, string headcode, string reversal)?[] results458)
+            (string unit, string status, string headcode, string identity, string reversal, string statusIndicator, string statusColor)[] results701,
+            (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor)?[] results458)
         {
             var inService701 = new Dictionary<string, List<string>>();
             var depot701 = new List<string>();
             var testing701 = new List<string>();
 
-            foreach (var (unit, status, headcode, identity, reversal) in results701)
+            foreach (var (unit, status, headcode, identity, reversal, statusIndicator, statusColor) in results701)
             {
                 var identityStr = identity ?? unit;
                 var headcodeStr = !string.IsNullOrEmpty(headcode) ? $" ({headcode})" : "";
-                var part = $"{identityStr}{headcodeStr}";
+                var statusStr = !string.IsNullOrEmpty(statusIndicator) && statusIndicator != "●" ? $" {statusIndicator}" : "";
+                var part = $"{identityStr}{headcodeStr}{statusStr}";
                 var label = string.IsNullOrEmpty(reversal) ? part : $"{part} – reverses at {reversal}";
 
                 if (status == "in_service")
@@ -220,12 +298,13 @@ namespace SWR701Tracker
             foreach (var r in results458)
             {
                 if (r == null) continue;
-                var (formation, status, headcode, reversal) = r.Value;
+                var (formation, status, headcode, reversal, statusIndicator, statusColor) = r.Value;
                 if (status == "in_service" && seenForm.Add(formation))
                 {
+                    var statusStr = !string.IsNullOrEmpty(statusIndicator) && statusIndicator != "●" ? $" {statusIndicator}" : "";
                     var label = string.IsNullOrEmpty(reversal)
-                        ? $"{formation} ({headcode})"
-                        : $"{formation} ({headcode}) – reverses at {reversal}";
+                        ? $"{formation} ({headcode}){statusStr}"
+                        : $"{formation} ({headcode}){statusStr} – reverses at {reversal}";
                     var line = GetLineFromHeadcode(headcode);
                     if (line == "Depot")
                     {
