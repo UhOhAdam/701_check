@@ -61,7 +61,7 @@ namespace SWR701Tracker
         static string GetLineFromHeadcode(string headcode)
         {
             if (string.IsNullOrEmpty(headcode)) return "Depot";
-            return HEADCODE_TO_LINE.TryGetValue(headcode[..2], out var line) ? line : "Depot";
+            return HEADCODE_TO_LINE.TryGetValue(headcode[..2], out var line) ? line : "Other";
         }
 
         static string GetAnsiColor(string statusColor)
@@ -304,6 +304,7 @@ namespace SWR701Tracker
             var inService701 = new Dictionary<string, List<string>>();
             var depot701 = new List<string>();
             var testing701 = new List<string>();
+            var other701 = new List<string>();
 
             foreach (var (unit, status, headcode, identity, reversal, statusIndicator, statusColor) in results701)
             {
@@ -317,6 +318,7 @@ namespace SWR701Tracker
                 {
                     var line = GetLineFromHeadcode(headcode);
                     if (line == "Depot") depot701.Add(label);
+                    else if (line == "Other") other701.Add(label);
                     else
                     {
                         if (!inService701.ContainsKey(line)) inService701[line] = new List<string>();
@@ -354,7 +356,7 @@ namespace SWR701Tracker
             }
 
             var now = DateTime.UtcNow.AddHours(1).ToString("yyyy-MM-dd HH:mm:ss");
-            int total701 = inService701.Values.Sum(v => v.Count) + depot701.Count + testing701.Count;
+            int total701 = inService701.Values.Sum(v => v.Count) + depot701.Count + testing701.Count + other701.Count;
             // Count individual units by splitting formations on '+'
             int total458 = inService458.Values.Sum(v => v.Sum(f => f.Split(' ')[0].Split('+').Length)) +
                           depot458.Sum(f => f.Split(' ')[0].Split('+').Length);
@@ -392,6 +394,14 @@ namespace SWR701Tracker
             {
                 content += $"🛠️ Testing ({testing701.Count}):\n";
                 foreach (var unit in testing701)
+                    content += $"• {unit}\n";
+                content += "\n";
+            }
+
+            if (other701.Any())
+            {
+                content += $"❓ Other ({other701.Count}):\n";
+                foreach (var unit in other701)
                     content += $"• {unit}\n";
                 content += "\n";
             }
