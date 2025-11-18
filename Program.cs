@@ -355,7 +355,7 @@ namespace SWR701Tracker
                 }
             }
 
-            var now = DateTime.UtcNow.AddHours(1).ToString("yyyy-MM-dd HH:mm:ss");
+            var now = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
             int total701 = inService701.Values.Sum(v => v.Count) + depot701.Count + testing701.Count + other701.Count;
             // Count individual units by splitting formations on '+'
             int total458 = inService458.Values.Sum(v => v.Sum(f => f.Split(' ')[0].Split('+').Length)) +
@@ -515,7 +515,7 @@ namespace SWR701Tracker
                 content += "\n";
             }
 
-            content += "\nPowered by SWR Unit Tracker (Beta) v1.8.0\n```";
+            content += "\nPowered by SWR Unit Tracker (Beta) v1.8.3\n```";
 
             Console.WriteLine("\n" + content);
 
