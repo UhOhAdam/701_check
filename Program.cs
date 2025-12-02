@@ -134,6 +134,7 @@ namespace SWR701Tracker
                     var (headcode, identities, reversal, statusIndicator, statusColor) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: is458);
                     var clean = SquashReversal(identities ?? new List<string>());
                     var formation = string.Join("+", clean);
+                    if (string.IsNullOrEmpty(formation)) formation = unitNumber;
                     var status = ClassifyUnit(headcode);
                     foreach (var id in identities ?? Enumerable.Empty<string>()) seen.Add(id);
 
@@ -438,39 +439,52 @@ namespace SWR701Tracker
                 content += "\n";
             }
 
-            // Process 701/5 results
-            var inService7015 = new Dictionary<string, HashSet<string>>();
-            var depot7015 = new List<string>();
-            var testing7015 = new List<string>();
-            var seenForm7015 = new HashSet<string>();
+            // Process 701/5 results - group by service
+            var grouped7015 = new Dictionary<string, List<string>>();
             foreach (var r in results7015)
             {
                 if (r == null) continue;
                 var (formation, status, headcode, reversal, statusIndicator, statusColor) = r.Value;
-                if (seenForm7015.Add(formation))
-                {
-                    var statusStr = ColorizeStatus(statusIndicator, statusColor);
-                    var label = string.IsNullOrEmpty(reversal)
-                        ? $"{formation} ({headcode}){statusStr}"
-                        : $"{formation} ({headcode}){statusStr} – reverses at {reversal}";
+                var serviceKey = $"{status}|{headcode}|{reversal}|{statusIndicator}|{statusColor}";
+                if (!grouped7015.ContainsKey(serviceKey)) grouped7015[serviceKey] = new List<string>();
+                grouped7015[serviceKey].Add(formation);
+            }
 
-                    if (status == "in_service")
+            var inService7015 = new Dictionary<string, HashSet<string>>();
+            var depot7015 = new List<string>();
+            var testing7015 = new List<string>();
+            
+            foreach (var (serviceKey, units) in grouped7015)
+            {
+                var parts = serviceKey.Split('|');
+                var status = parts[0];
+                var headcode = parts[1];
+                var reversal = parts[2];
+                var statusIndicator = parts[3];
+                var statusColor = parts[4];
+                
+                var formation = string.Join("+", units.OrderBy(u => u));
+                var statusStr = ColorizeStatus(statusIndicator, statusColor);
+                var label = string.IsNullOrEmpty(reversal)
+                    ? $"{formation} ({headcode}){statusStr}"
+                    : $"{formation} ({headcode}){statusStr} – reverses at {reversal}";
+
+                if (status == "in_service")
+                {
+                    var line = GetLineFromHeadcode(headcode);
+                    if (line == "Depot")
                     {
-                        var line = GetLineFromHeadcode(headcode);
-                        if (line == "Depot")
-                        {
-                            depot7015.Add(label);
-                        }
-                        else
-                        {
-                            if (!inService7015.ContainsKey(line)) inService7015[line] = new HashSet<string>();
-                            inService7015[line].Add(label);
-                        }
+                        depot7015.Add(label);
                     }
-                    else if (status == "testing")
+                    else
                     {
-                        testing7015.Add(label);
+                        if (!inService7015.ContainsKey(line)) inService7015[line] = new HashSet<string>();
+                        inService7015[line].Add(label);
                     }
+                }
+                else if (status == "testing")
+                {
+                    testing7015.Add(label);
                 }
             }
 
