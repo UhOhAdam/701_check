@@ -22,7 +22,7 @@ namespace SWR701Tracker
             {"1H", "Shepperton"}, {"2K", "Kingston Loop via Wimbledon"}, {"2O", "Kingston Loop via Richmond"},
             {"2C", "Reading"}, {"1C", "Reading"}, {"2V", "Hounslow Loop via Hounslow"}, {"2R", "Hounslow Loop via Richmond"},
             {"2S", "Weybridge"}, {"1S", "Weybridge"}, {"2G", "Guildford via Cobham"}, {"2D", "Guildford via Epsom"},
-            {"2F", "Woking"}, {"2M", "Chessington South"}, {"1D", "Dorking"}
+            {"2F", "Woking"}, {"2M", "Chessington South"}, {"1N", "Aldershot via Richmond"}, {"1D", "Dorking"}
         };
 
         static readonly string[] ACTIVE_4585_UNITS = { "458529", "458530", "458533", "458535", "458536" };
@@ -440,8 +440,8 @@ namespace SWR701Tracker
 
             // Process 701/5 results
             var inService7015 = new Dictionary<string, HashSet<string>>();
-            var depot7015 = new HashSet<string>();
-            var testing7015 = new HashSet<string>();
+            var depot7015 = new List<string>();
+            var testing7015 = new List<string>();
             var seenForm7015 = new HashSet<string>();
             foreach (var r in results7015)
             {
@@ -515,7 +515,7 @@ namespace SWR701Tracker
                 content += "\n";
             }
 
-            content += "\nPowered by SWR Unit Tracker (Beta) v1.8.3\n```";
+            content += "\nPowered by SWR Unit Tracker (Beta) v1.8.3.1\n```";
 
             Console.WriteLine("\n" + content);
 
