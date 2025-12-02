@@ -45,7 +45,7 @@ namespace SWR701Tracker
             var results458 = await Task.WhenAll(tasks458);
 
             var seen7015 = new HashSet<string>();
-            var tasks7015 = ACTIVE_7015_UNITS.Select(u => Check458Async(client, u, seen7015)).ToArray();
+            var tasks7015 = ACTIVE_7015_UNITS.Select(u => Check458Async(client, u, seen7015, is458: false)).ToArray();
             var results7015 = await Task.WhenAll(tasks7015);
 
             await NotifyDiscord(nonNullableResults701, results458, results7015);
@@ -120,7 +120,7 @@ namespace SWR701Tracker
         }
 
         // === 458s: multiple identities + reversal + status ===
-        static async Task<(string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor)?> Check458Async(HttpClient client, string unitNumber, HashSet<string> seen)
+        static async Task<(string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor)?> Check458Async(HttpClient client, string unitNumber, HashSet<string> seen, bool is458 = true)
         {
             if (seen.Contains(unitNumber)) return null;
 
@@ -131,7 +131,7 @@ namespace SWR701Tracker
                 if ((int)resp.StatusCode == 302 && resp.Headers.Location?.ToString().StartsWith("/service/") == true)
                 {
                     var serviceUrl = SERVICE_URL + resp.Headers.Location.ToString();
-                    var (headcode, identities, reversal, statusIndicator, statusColor) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: true);
+                    var (headcode, identities, reversal, statusIndicator, statusColor) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: is458);
                     var clean = SquashReversal(identities ?? new List<string>());
                     var formation = string.Join("+", clean);
                     var status = ClassifyUnit(headcode);
