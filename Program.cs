@@ -358,6 +358,51 @@ namespace SWR701Tracker
             return units;
         }
 
+        // === Helper to split messages for Discord's 2000 char limit ===
+        static List<string> SplitMessageForDiscord(string content, int maxLength)
+        {
+            var messages = new List<string>();
+            if (content.Length <= maxLength)
+            {
+                messages.Add(content);
+                return messages;
+            }
+
+            // Split by double newlines (section breaks) to keep logical sections together
+            var sections = content.Split(new[] { "\n\n" }, StringSplitOptions.None);
+            var currentMessage = "";
+            var isFirstMessage = true;
+
+            foreach (var section in sections)
+            {
+                var sectionWithBreak = currentMessage.Length > 0 ? "\n\n" + section : section;
+
+                if (currentMessage.Length + sectionWithBreak.Length > maxLength && currentMessage.Length > 0)
+                {
+                    // Close code block if we're splitting mid-message
+                    if (isFirstMessage || !currentMessage.StartsWith("```"))
+                    {
+                        if (!currentMessage.TrimEnd().EndsWith("```"))
+                            currentMessage += "\n```";
+                    }
+                    messages.Add(currentMessage);
+
+                    // Start new message with code block continuation
+                    currentMessage = "```ansi\n" + section;
+                    isFirstMessage = false;
+                }
+                else
+                {
+                    currentMessage += sectionWithBreak;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(currentMessage))
+                messages.Add(currentMessage);
+
+            return messages;
+        }
+
         // === Format & send Discord message ===
         static async Task NotifyDiscord(
             (string unit, string status, string headcode, string identity, string reversal, string statusIndicator, string statusColor, string lastSeenLocation)[] results701,
@@ -710,13 +755,19 @@ namespace SWR701Tracker
 
             Console.WriteLine("\n" + content);
 
-            // Send to Discord
+            // Send to Discord - split into multiple messages if over 2000 chars
             using var client = new HttpClient();
-            var payload = new { content };
-            var json = JsonSerializer.Serialize(payload);
-            var resp = await client.PostAsync(DISCORD_WEBHOOK_URL,
-                new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
-            resp.EnsureSuccessStatusCode();
+            var messages = SplitMessageForDiscord(content, 1900); // Leave margin for safety
+            foreach (var msg in messages)
+            {
+                var payload = new { content = msg };
+                var json = JsonSerializer.Serialize(payload);
+                var resp = await client.PostAsync(DISCORD_WEBHOOK_URL,
+                    new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
+                resp.EnsureSuccessStatusCode();
+                if (messages.Count > 1)
+                    await Task.Delay(500); // Rate limit protection between messages
+            }
         }
     }
 }
