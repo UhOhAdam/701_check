@@ -17,7 +17,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Restore dependencies
         run: dotnet restore
@@ -28,4 +28,4 @@ jobs:
       - name: Run 701_check
         run: |
           $env:DISCORD_WEBHOOK = "${{ secrets.DISCORD_WEBHOOK }}"
-          ./bin/Release/net8.0/701_check.exe
+          ./bin/Release/net10.0/701_check.exe

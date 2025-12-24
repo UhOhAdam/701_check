@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a C# .NET 8.0 console application called "701_check" that monitors South Western Railway (SWR) train fleet status. The application scrapes real-time train data from realtimetrains.co.uk and posts formatted reports to Discord via webhooks.
+This is a C# .NET 10.0 console application called "701_check" that monitors South Western Railway (SWR) train fleet status. The application scrapes real-time train data from realtimetrains.co.uk and posts formatted reports to Discord via webhooks.
 
 ## Core Architecture
 
@@ -45,11 +45,11 @@ dotnet build --configuration Release
 dotnet run
 
 # Run built executable (Release)
-./bin/Release/net8.0/701_check.exe
+./bin/Release/net10.0/701_check.exe
 ```
 
 ### Dependencies
-- .NET 8.0
+- .NET 10.0
 - HtmlAgilityPack 1.12.1 (for HTML parsing)
 - System.Text.Json (built-in, for Discord webhook payloads)
 
@@ -77,12 +77,12 @@ The application contains hardcoded mappings of 2-character headcodes to SWR rail
 ### GitHub Actions
 The repository includes automated scheduled execution via `.github/workflows/701_check.yml`:
 - Runs every 30 minutes from 4:00-22:30 GMT
-- Uses Windows runners with .NET 8.0
+- Uses Windows runners with .NET 10.0
 - Requires DISCORD_WEBHOOK secret to be configured in repository
 
 ### Build Process
 1. Checkout code
-2. Setup .NET 8.0
+2. Setup .NET 10.0
 3. Restore dependencies
 4. Build in Release configuration
 5. Execute with environment variables
