@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using HtmlAgilityPack;
 using System.Text.Json;
@@ -31,23 +32,22 @@ namespace SWR701Tracker
             {"1N", "Aldershot via Richmond"}, {"1D", "Dorking"}
         };
 
-        static readonly string[] ACTIVE_4585_UNITS = { "458529", "458530", "458533", "458535" };
+        static readonly string[] ACTIVE_4585_UNITS = { "458530", "458533", "458535" };
         static readonly string[] ACTIVE_7015_UNITS = Enumerable.Range(501, 30).Select(i => $"701{i}").ToArray();
 
-        // Full 455 fleet to monitor (19 units)
+        // 455 fleet to monitor (9 units, as of February 2026)
         static readonly string[] ACTIVE_455_UNITS = {
-            // 455/7 (14 units)
-            "455701", "455709", "455710", "455712", "455716", "455717", "455719", "455720",
-            "455721", "455727", "455729", "455732", "455734", "455737",
-            // 455/8 (5 units)
-            "455863", "455869", "455870", "455871", "455873"
+            // 455/7 (6 units)
+            "455712", "455716", "455717", "455721", "455727", "455732",
+            // 455/8 (3 units)
+            "455870", "455871", "455873"
         };
 
-        // Known baseline units for dynamic total (12 units)
+        // Known baseline units for fleet total (9 units, as of February 2026)
         static readonly HashSet<string> KNOWN_455_UNITS = new()
         {
-            "455719", "455729", "455721", "455732", "455712", "455717",
-            "455727", "455871", "455716", "455870", "455873", "455737"
+            "455712", "455716", "455717", "455721", "455727", "455732",
+            "455870", "455871", "455873"
         };
 
         static async Task Main(string[] args)
@@ -59,7 +59,7 @@ namespace SWR701Tracker
                 .Select(i => Check701Async(client, $"701{i:D3}")).ToArray();
             var results701 = await Task.WhenAll(tasks701);
             var nonNullableResults701 = results701
-                .Select(r => (r.unit, r.status, r.headcode ?? string.Empty, r.identity ?? string.Empty, r.reversal ?? string.Empty, r.statusIndicator, r.statusColor, r.lastSeenLocation))
+                .Select(r => (r.unit, r.status, r.headcode ?? string.Empty, r.identity ?? string.Empty, r.reversal ?? string.Empty, r.statusIndicator, r.statusColor, r.lastSeenLocation, r.isCancelled, r.isPartiallyCancelled))
                 .ToArray();
 
             var seen = new HashSet<string>();
@@ -94,6 +94,28 @@ namespace SWR701Tracker
             return HEADCODE_TO_LINE.TryGetValue(headcode[..2], out var line) ? line : "Other";
         }
 
+        static string GetDirectionEmoji(string headcode)
+        {
+            if (string.IsNullOrEmpty(headcode)) return "•";
+
+            var prefix = headcode.Length >= 2 ? headcode[..2] : headcode;
+
+            // Loop services
+            if (prefix == "2K" || prefix == "2O" || prefix == "2V" || prefix == "2R")
+                return "🔁";
+
+            // Shuttle services
+            if (prefix == "2N" || prefix == "2E")
+                return "↔";
+
+            // Determine direction from running number (last digits of headcode)
+            var numMatch = Regex.Match(headcode, @"(\d+)$");
+            if (numMatch.Success && int.TryParse(numMatch.Value, out int runningNumber))
+                return runningNumber % 2 == 0 ? "⬆\uFE0F" : "⬇\uFE0F";
+
+            return "•";
+        }
+
         // Calculate dynamic 455 total: base known count + any unexpected units seen
         static int GetDynamic455Total(IEnumerable<string> activeUnits)
         {
@@ -115,7 +137,7 @@ namespace SWR701Tracker
             };
         }
 
-        static string ColorizeStatus(string statusIndicator, string statusColor)
+        static string ColorizeStatus(string statusIndicator, string statusColor, bool isCancelled = false)
         {
             if (string.IsNullOrEmpty(statusIndicator))
                 return "";
@@ -123,6 +145,7 @@ namespace SWR701Tracker
             if (statusIndicator == "●")
             {
                 // Use emoji circles instead of the bullet character
+                if (isCancelled) return " 🔴";
                 return statusColor == "LimeGreen" ? " 🟢" : " ⚪";
             }
 
@@ -132,7 +155,7 @@ namespace SWR701Tracker
         }
 
         // === 701s: one identity + possible reversal + status + last seen ===
-        static async Task<(string unit, string status, string? headcode, string? identity, string? reversal, string statusIndicator, string statusColor, string lastSeenLocation)>
+        static async Task<(string unit, string status, string? headcode, string? identity, string? reversal, string statusIndicator, string statusColor, string lastSeenLocation, bool isCancelled, bool isPartiallyCancelled)>
         Check701Async(HttpClient client, string unitNumber)
 
         {
@@ -143,22 +166,22 @@ namespace SWR701Tracker
                 if ((int)resp.StatusCode == 302 && resp.Headers.Location?.ToString().StartsWith("/service/") == true)
                 {
                     var serviceUrl = SERVICE_URL + resp.Headers.Location.ToString();
-                    var (headcode, identities, reversal, statusIndicator, statusColor, lastSeenLocation) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: false);
+                    var (headcode, identities, reversal, statusIndicator, statusColor, lastSeenLocation, isCancelled, isPartiallyCancelled) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: false);
                     var identity = identities.FirstOrDefault() ?? unitNumber;
                     var status = ClassifyUnit(headcode);
-                    return (unitNumber, status, headcode, identity, reversal, statusIndicator, statusColor, lastSeenLocation);
+                    return (unitNumber, status, headcode, identity, reversal, statusIndicator, statusColor, lastSeenLocation, isCancelled, isPartiallyCancelled);
                 }
-                return (unitNumber, "not_running", null, null, null, "●", "Gray", "");
+                return (unitNumber, "not_running", null, null, null, "●", "Gray", "", false, false);
             }
             catch (Exception e)
             {
                 Console.WriteLine($"701 {unitNumber}: Error - {e.Message}");
-                return (unitNumber, "error", null, null, null, "●", "Gray", "");
+                return (unitNumber, "error", null, null, null, "●", "Gray", "", false, false);
             }
         }
 
         // === 458s: multiple identities + reversal + status + last seen ===
-        static async Task<(string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor, string lastSeenLocation)?> Check458Async(HttpClient client, string unitNumber, HashSet<string> seen, bool is458 = true)
+        static async Task<(string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor, string lastSeenLocation, bool isCancelled, bool isPartiallyCancelled)?> Check458Async(HttpClient client, string unitNumber, HashSet<string> seen, bool is458 = true)
         {
             if (seen.Contains(unitNumber)) return null;
 
@@ -169,7 +192,7 @@ namespace SWR701Tracker
                 if ((int)resp.StatusCode == 302 && resp.Headers.Location?.ToString().StartsWith("/service/") == true)
                 {
                     var serviceUrl = SERVICE_URL + resp.Headers.Location.ToString();
-                    var (headcode, identities, reversal, statusIndicator, statusColor, lastSeenLocation) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: is458);
+                    var (headcode, identities, reversal, statusIndicator, statusColor, lastSeenLocation, isCancelled, isPartiallyCancelled) = await FetchHeadcodeAndIdentities(client, serviceUrl, is458: is458);
                     var clean = SquashReversal(identities ?? new List<string>());
                     var formation = string.Join("+", clean);
                     if (string.IsNullOrEmpty(formation)) formation = unitNumber;
@@ -177,7 +200,7 @@ namespace SWR701Tracker
                     foreach (var id in identities ?? Enumerable.Empty<string>()) seen.Add(id);
 
                     // Ensure non-null values for headcode, reversal, and lastSeenLocation
-                    return (formation, status, headcode ?? string.Empty, reversal ?? string.Empty, statusIndicator, statusColor, lastSeenLocation);
+                    return (formation, status, headcode ?? string.Empty, reversal ?? string.Empty, statusIndicator, statusColor, lastSeenLocation, isCancelled, isPartiallyCancelled);
                 }
                 return null;
             }
@@ -285,8 +308,8 @@ namespace SWR701Tracker
             }
         }
 
-        // === Extract headcode, identities, reversal station, status, and last seen location ===
-        static async Task<(string? headcode, List<string> identities, string? reversal, string statusIndicator, string statusColor, string lastSeenLocation)>
+        // === Extract headcode, identities, reversal station, status, last seen location, and cancellation flags ===
+        static async Task<(string? headcode, List<string> identities, string? reversal, string statusIndicator, string statusColor, string lastSeenLocation, bool isCancelled, bool isPartiallyCancelled)>
         FetchHeadcodeAndIdentities(HttpClient client, string serviceUrl, bool is458)
 
         {
@@ -296,6 +319,23 @@ namespace SWR701Tracker
                 var html = await resp.Content.ReadAsStringAsync();
                 var doc = new HtmlDocument();
                 doc.LoadHtml(html);
+
+                // Check for cancellation alerts
+                bool isCancelled = false;
+                bool isPartiallyCancelled = false;
+                var alertNodes = doc.DocumentNode.SelectNodes("//div[contains(@class,'callout') and (contains(@class,'alert') or contains(@class,'primary'))]");
+                if (alertNodes != null)
+                {
+                    foreach (var alertNode in alertNodes)
+                    {
+                        var headerNode = alertNode.SelectSingleNode(".//h4");
+                        var headerText = headerNode?.InnerText.Trim() ?? "";
+                        if (headerText.Contains("partially cancelled", StringComparison.OrdinalIgnoreCase))
+                            isPartiallyCancelled = true;
+                        else if (headerText.Contains("cancelled", StringComparison.OrdinalIgnoreCase))
+                            isCancelled = true;
+                    }
+                }
 
                 var header = doc.DocumentNode.SelectSingleNode("//div[@class='header']");
                 var headcode = header?.InnerText?.Trim()?.Split(' ').FirstOrDefault();
@@ -336,12 +376,12 @@ namespace SWR701Tracker
                 // Determine unit status and last seen location from the HTML
                 var (statusIndicator, statusColor, lastSeenLocation) = DetermineUnitStatus(html);
 
-                return (headcode, identities, reversalStation, statusIndicator, statusColor, lastSeenLocation);
+                return (headcode, identities, reversalStation, statusIndicator, statusColor, lastSeenLocation, isCancelled, isPartiallyCancelled);
             }
             catch (Exception e)
             {
                 Console.WriteLine($"Error fetching RTT data from {serviceUrl}: {e.Message}");
-                return (null, new List<string>(), null, "●", "Gray", "");
+                return (null, new List<string>(), null, "●", "Gray", "", false, false);
             }
         }
 
@@ -405,24 +445,25 @@ namespace SWR701Tracker
 
         // === Format & send Discord message ===
         static async Task NotifyDiscord(
-            (string unit, string status, string headcode, string identity, string reversal, string statusIndicator, string statusColor, string lastSeenLocation)[] results701,
-            (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor, string lastSeenLocation)?[] results458,
-            (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor, string lastSeenLocation)?[] results455,
-            (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor, string lastSeenLocation)?[] results7015)
+            (string unit, string status, string headcode, string identity, string reversal, string statusIndicator, string statusColor, string lastSeenLocation, bool isCancelled, bool isPartiallyCancelled)[] results701,
+            (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor, string lastSeenLocation, bool isCancelled, bool isPartiallyCancelled)?[] results458,
+            (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor, string lastSeenLocation, bool isCancelled, bool isPartiallyCancelled)?[] results455,
+            (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor, string lastSeenLocation, bool isCancelled, bool isPartiallyCancelled)?[] results7015)
         {
-            var inService701 = new Dictionary<string, List<string>>();
+            var inService701 = new Dictionary<string, List<(string label, string headcode)>>();
             var depot701 = new List<string>();
             var testing701 = new List<string>();
             var other701 = new List<string>();
 
-            foreach (var (unit, status, headcode, identity, reversal, statusIndicator, statusColor, lastSeenLocation) in results701)
+            foreach (var (unit, status, headcode, identity, reversal, statusIndicator, statusColor, lastSeenLocation, isCancelled, isPartiallyCancelled) in results701)
             {
                 var identityStr = identity ?? unit;
                 var headcodeStr = !string.IsNullOrEmpty(headcode) ? $" ({headcode})" : "";
-                var statusStr = ColorizeStatus(statusIndicator, statusColor);
+                var statusStr = ColorizeStatus(statusIndicator, statusColor, isCancelled);
                 var lastSeenStr = !string.IsNullOrEmpty(lastSeenLocation) ? $" – last seen at {lastSeenLocation}" : "";
+                var cancelStr = isCancelled ? " - Cancelled" : isPartiallyCancelled ? " - Partially cancelled" : "";
                 var part = $"{identityStr}{headcodeStr}{statusStr}{lastSeenStr}";
-                var label = string.IsNullOrEmpty(reversal) ? part : $"{part} – reverses at {reversal}";
+                var label = string.IsNullOrEmpty(reversal) ? $"{part}{cancelStr}" : $"{part} – reverses at {reversal}{cancelStr}";
 
                 if (status == "depot")
                     depot701.Add(label);
@@ -435,27 +476,28 @@ namespace SWR701Tracker
                     else if (line == "Other") other701.Add(label);
                     else
                     {
-                        if (!inService701.ContainsKey(line)) inService701[line] = new List<string>();
-                        inService701[line].Add(label);
+                        if (!inService701.ContainsKey(line)) inService701[line] = new List<(string, string)>();
+                        inService701[line].Add((label, headcode));
                     }
                 }
             }
 
-            var inService458 = new Dictionary<string, HashSet<string>>();
+            var inService458 = new Dictionary<string, HashSet<(string label, string headcode)>>();
             var depot458 = new HashSet<string>();
             var testing458 = new HashSet<string>();
             var seenForm458 = new HashSet<string>();
             foreach (var r in results458)
             {
                 if (r == null) continue;
-                var (formation, status, headcode, reversal, statusIndicator, statusColor, lastSeenLocation) = r.Value;
+                var (formation, status, headcode, reversal, statusIndicator, statusColor, lastSeenLocation, isCancelled, isPartiallyCancelled) = r.Value;
                 if (!seenForm458.Add(formation)) continue;
 
-                var statusStr = ColorizeStatus(statusIndicator, statusColor);
+                var statusStr = ColorizeStatus(statusIndicator, statusColor, isCancelled);
                 var lastSeenStr = !string.IsNullOrEmpty(lastSeenLocation) ? $" – last seen at {lastSeenLocation}" : "";
+                var cancelStr = isCancelled ? " - Cancelled" : isPartiallyCancelled ? " - Partially cancelled" : "";
                 var label = string.IsNullOrEmpty(reversal)
-                    ? $"{formation} ({headcode}){statusStr}{lastSeenStr}"
-                    : $"{formation} ({headcode}){statusStr}{lastSeenStr} – reverses at {reversal}";
+                    ? $"{formation} ({headcode}){statusStr}{lastSeenStr}{cancelStr}"
+                    : $"{formation} ({headcode}){statusStr}{lastSeenStr} – reverses at {reversal}{cancelStr}";
 
                 if (status == "depot")
                     depot458.Add(label);
@@ -468,14 +510,14 @@ namespace SWR701Tracker
                         depot458.Add(label);
                     else
                     {
-                        if (!inService458.ContainsKey(line)) inService458[line] = new HashSet<string>();
-                        inService458[line].Add(label);
+                        if (!inService458.ContainsKey(line)) inService458[line] = new HashSet<(string, string)>();
+                        inService458[line].Add((label, headcode));
                     }
                 }
             }
 
             // Process 455 results
-            var inService455 = new Dictionary<string, HashSet<string>>();
+            var inService455 = new Dictionary<string, HashSet<(string label, string headcode)>>();
             var depot455 = new HashSet<string>();
             var testing455 = new HashSet<string>();
             var seenForm455 = new HashSet<string>();
@@ -483,18 +525,19 @@ namespace SWR701Tracker
             foreach (var r in results455)
             {
                 if (r == null) continue;
-                var (formation, status, headcode, reversal, statusIndicator, statusColor, lastSeenLocation) = r.Value;
+                var (formation, status, headcode, reversal, statusIndicator, statusColor, lastSeenLocation, isCancelled, isPartiallyCancelled) = r.Value;
                 if (!seenForm455.Add(formation)) continue;
 
                 // Track all active units for dynamic total
                 foreach (var u in formation.Split('+'))
                     activeUnits455.Add(u.Trim());
 
-                var statusStr = ColorizeStatus(statusIndicator, statusColor);
+                var statusStr = ColorizeStatus(statusIndicator, statusColor, isCancelled);
                 var lastSeenStr = !string.IsNullOrEmpty(lastSeenLocation) ? $" – last seen at {lastSeenLocation}" : "";
+                var cancelStr = isCancelled ? " - Cancelled" : isPartiallyCancelled ? " - Partially cancelled" : "";
                 var label = string.IsNullOrEmpty(reversal)
-                    ? $"{formation} ({headcode}){statusStr}{lastSeenStr}"
-                    : $"{formation} ({headcode}){statusStr}{lastSeenStr} – reverses at {reversal}";
+                    ? $"{formation} ({headcode}){statusStr}{lastSeenStr}{cancelStr}"
+                    : $"{formation} ({headcode}){statusStr}{lastSeenStr} – reverses at {reversal}{cancelStr}";
 
                 if (status == "depot")
                     depot455.Add(label);
@@ -507,8 +550,8 @@ namespace SWR701Tracker
                         depot455.Add(label);
                     else
                     {
-                        if (!inService455.ContainsKey(line)) inService455[line] = new HashSet<string>();
-                        inService455[line].Add(label);
+                        if (!inService455.ContainsKey(line)) inService455[line] = new HashSet<(string, string)>();
+                        inService455[line].Add((label, headcode));
                     }
                 }
             }
@@ -516,10 +559,10 @@ namespace SWR701Tracker
             var now = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
             int total701 = inService701.Values.Sum(v => v.Count) + depot701.Count + testing701.Count + other701.Count;
             // Count individual units by splitting formations on '+'
-            int total458 = inService458.Values.Sum(v => v.Sum(f => f.Split(' ')[0].Split('+').Length)) +
+            int total458 = inService458.Values.Sum(v => v.Sum(f => f.label.Split(' ')[0].Split('+').Length)) +
                           depot458.Sum(f => f.Split(' ')[0].Split('+').Length) +
                           testing458.Sum(f => f.Split(' ')[0].Split('+').Length);
-            int total455 = inService455.Values.Sum(v => v.Sum(f => f.Split(' ')[0].Split('+').Length)) +
+            int total455 = inService455.Values.Sum(v => v.Sum(f => f.label.Split(' ')[0].Split('+').Length)) +
                           depot455.Sum(f => f.Split(' ')[0].Split('+').Length) +
                           testing455.Sum(f => f.Split(' ')[0].Split('+').Length);
             int dynamic455Total = GetDynamic455Total(activeUnits455);
@@ -534,13 +577,13 @@ namespace SWR701Tracker
                 {
                     content += $"{line} ({labels.Count}):\n";
 
-                    var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
-                    var revs = labels.Where(l => l.Contains("reverses at")).ToList();
+                    var normals = labels.Where(l => !l.label.Contains("reverses at")).ToList();
+                    var revs = labels.Where(l => l.label.Contains("reverses at")).ToList();
 
-                    foreach (var normal in normals)
-                        content += $"• {normal}\n";
-                    foreach (var rev in revs)
-                        content += $"• {rev}\n";
+                    foreach (var (label, headcode) in normals)
+                        content += $"{GetDirectionEmoji(headcode)} {label}\n";
+                    foreach (var (label, headcode) in revs)
+                        content += $"{GetDirectionEmoji(headcode)} {label}\n";
 
                     content += "\n"; // Line break between destinations
                 }
@@ -570,23 +613,23 @@ namespace SWR701Tracker
             }
 
             // 458/5 section
-            content += $"🚆 458/5s: {total458}/4 units seen today\n";
+            content += $"458/5s: {total458}/3 units seen today\n";
             if (inService458.Any())
             {
-                var inService458Count = inService458.Values.Sum(v => v.Sum(f => f.Split(' ')[0].Split('+').Length));
+                var inService458Count = inService458.Values.Sum(v => v.Sum(f => f.label.Split(' ')[0].Split('+').Length));
                 content += $"🟢 In service ({inService458Count}):\n";
                 foreach (var (line, labels) in inService458.OrderBy(x => x.Key))
                 {
-                    var lineUnitCount = labels.Sum(f => f.Split(' ')[0].Split('+').Length);
+                    var lineUnitCount = labels.Sum(f => f.label.Split(' ')[0].Split('+').Length);
                     content += $"{line} ({lineUnitCount}):\n";
 
-                    var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
-                    var revs = labels.Where(l => l.Contains("reverses at")).ToList();
+                    var normals = labels.Where(l => !l.label.Contains("reverses at")).ToList();
+                    var revs = labels.Where(l => l.label.Contains("reverses at")).ToList();
 
-                    foreach (var normal in normals)
-                        content += $"• {normal}\n";
-                    foreach (var rev in revs)
-                        content += $"• {rev}\n";
+                    foreach (var (label, headcode) in normals)
+                        content += $"{GetDirectionEmoji(headcode)} {label}\n";
+                    foreach (var (label, headcode) in revs)
+                        content += $"{GetDirectionEmoji(headcode)} {label}\n";
 
                     content += "\n";
                 }
@@ -612,23 +655,23 @@ namespace SWR701Tracker
             content += "\n";
 
             // 455 section
-            content += $"🚃 455s: {total455}/{dynamic455Total} units seen today\n";
+            content += $"455s: {total455}/{dynamic455Total} units seen today\n";
             if (inService455.Any())
             {
-                var inService455Count = inService455.Values.Sum(v => v.Sum(f => f.Split(' ')[0].Split('+').Length));
+                var inService455Count = inService455.Values.Sum(v => v.Sum(f => f.label.Split(' ')[0].Split('+').Length));
                 content += $"🟢 In service ({inService455Count}):\n";
                 foreach (var (line, labels) in inService455.OrderBy(x => x.Key))
                 {
-                    var lineUnitCount = labels.Sum(f => f.Split(' ')[0].Split('+').Length);
+                    var lineUnitCount = labels.Sum(f => f.label.Split(' ')[0].Split('+').Length);
                     content += $"{line} ({lineUnitCount}):\n";
 
-                    var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
-                    var revs = labels.Where(l => l.Contains("reverses at")).ToList();
+                    var normals = labels.Where(l => !l.label.Contains("reverses at")).ToList();
+                    var revs = labels.Where(l => l.label.Contains("reverses at")).ToList();
 
-                    foreach (var normal in normals)
-                        content += $"• {normal}\n";
-                    foreach (var rev in revs)
-                        content += $"• {rev}\n";
+                    foreach (var (label, headcode) in normals)
+                        content += $"{GetDirectionEmoji(headcode)} {label}\n";
+                    foreach (var (label, headcode) in revs)
+                        content += $"{GetDirectionEmoji(headcode)} {label}\n";
 
                     content += "\n";
                 }
@@ -658,13 +701,13 @@ namespace SWR701Tracker
             foreach (var r in results7015)
             {
                 if (r == null) continue;
-                var (formation, status, headcode, reversal, statusIndicator, statusColor, lastSeenLocation) = r.Value;
-                var serviceKey = $"{status}|{headcode}|{reversal}|{statusIndicator}|{statusColor}|{lastSeenLocation}";
+                var (formation, status, headcode, reversal, statusIndicator, statusColor, lastSeenLocation, isCancelled, isPartiallyCancelled) = r.Value;
+                var serviceKey = $"{status}|{headcode}|{reversal}|{statusIndicator}|{statusColor}|{lastSeenLocation}|{isCancelled}|{isPartiallyCancelled}";
                 if (!grouped7015.ContainsKey(serviceKey)) grouped7015[serviceKey] = new List<string>();
                 grouped7015[serviceKey].Add(formation);
             }
 
-            var inService7015 = new Dictionary<string, HashSet<string>>();
+            var inService7015 = new Dictionary<string, HashSet<(string label, string headcode)>>();
             var depot7015 = new List<string>();
             var testing7015 = new List<string>();
 
@@ -677,13 +720,16 @@ namespace SWR701Tracker
                 var statusIndicator = parts[3];
                 var statusColor = parts[4];
                 var lastSeenLocation = parts.Length > 5 ? parts[5] : "";
+                var isCancelled = parts.Length > 6 && parts[6] == "True";
+                var isPartiallyCancelled = parts.Length > 7 && parts[7] == "True";
 
                 var formation = string.Join("+", units.OrderBy(u => u));
-                var statusStr = ColorizeStatus(statusIndicator, statusColor);
+                var statusStr = ColorizeStatus(statusIndicator, statusColor, isCancelled);
                 var lastSeenStr = !string.IsNullOrEmpty(lastSeenLocation) ? $" – last seen at {lastSeenLocation}" : "";
+                var cancelStr = isCancelled ? " - Cancelled" : isPartiallyCancelled ? " - Partially cancelled" : "";
                 var label = string.IsNullOrEmpty(reversal)
-                    ? $"{formation} ({headcode}){statusStr}{lastSeenStr}"
-                    : $"{formation} ({headcode}){statusStr}{lastSeenStr} – reverses at {reversal}";
+                    ? $"{formation} ({headcode}){statusStr}{lastSeenStr}{cancelStr}"
+                    : $"{formation} ({headcode}){statusStr}{lastSeenStr} – reverses at {reversal}{cancelStr}";
 
                 if (status == "depot")
                     depot7015.Add(label);
@@ -696,8 +742,8 @@ namespace SWR701Tracker
                         depot7015.Add(label);
                     else
                     {
-                        if (!inService7015.ContainsKey(line)) inService7015[line] = new HashSet<string>();
-                        inService7015[line].Add(label);
+                        if (!inService7015.ContainsKey(line)) inService7015[line] = new HashSet<(string, string)>();
+                        inService7015[line].Add((label, headcode));
                     }
                 }
             }
@@ -706,27 +752,27 @@ namespace SWR701Tracker
             bool has7015 = inService7015.Any() || depot7015.Any() || testing7015.Any();
             if (has7015)
             {
-                int total7015 = inService7015.Values.Sum(v => v.Sum(f => f.Split(' ')[0].Split('+').Length)) +
+                int total7015 = inService7015.Values.Sum(v => v.Sum(f => f.label.Split(' ')[0].Split('+').Length)) +
                                depot7015.Sum(f => f.Split(' ')[0].Split('+').Length) +
                                testing7015.Sum(f => f.Split(' ')[0].Split('+').Length);
-                content += $"🚊 701/5s: {total7015}/30 units seen today\n";
+                content += $"701/5s: {total7015}/30 units seen today\n";
 
                 if (inService7015.Any())
                 {
-                    var inService7015Count = inService7015.Values.Sum(v => v.Sum(f => f.Split(' ')[0].Split('+').Length));
+                    var inService7015Count = inService7015.Values.Sum(v => v.Sum(f => f.label.Split(' ')[0].Split('+').Length));
                     content += $"🟢 In service ({inService7015Count}):\n";
                     foreach (var (line, labels) in inService7015.OrderBy(x => x.Key))
                     {
-                        var lineUnitCount = labels.Sum(f => f.Split(' ')[0].Split('+').Length);
+                        var lineUnitCount = labels.Sum(f => f.label.Split(' ')[0].Split('+').Length);
                         content += $"{line} ({lineUnitCount}):\n";
 
-                        var normals = labels.Where(l => !l.Contains("reverses at")).ToList();
-                        var revs = labels.Where(l => l.Contains("reverses at")).ToList();
+                        var normals = labels.Where(l => !l.label.Contains("reverses at")).ToList();
+                        var revs = labels.Where(l => l.label.Contains("reverses at")).ToList();
 
-                        foreach (var normal in normals)
-                            content += $"• {normal}\n";
-                        foreach (var rev in revs)
-                            content += $"• {rev}\n";
+                        foreach (var (label, headcode) in normals)
+                            content += $"{GetDirectionEmoji(headcode)} {label}\n";
+                        foreach (var (label, headcode) in revs)
+                            content += $"{GetDirectionEmoji(headcode)} {label}\n";
 
                         content += "\n";
                     }
@@ -751,7 +797,7 @@ namespace SWR701Tracker
                 }
             }
 
-            content += "\nPowered by SWR Unit Tracker v2.0.0\n```";
+            content += "\nPowered by SWR Unit Tracker v2.1.0\n```";
 
             Console.WriteLine("\n" + content);
 
