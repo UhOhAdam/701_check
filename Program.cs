@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
@@ -797,7 +797,7 @@ namespace SWR701Tracker
                 }
             }
 
-            content += "\nPowered by SWR Unit Tracker v2.1.0\n```";
+            content += "\nPowered by SWR Unit Tracker v2.1.1\n```";
 
             Console.WriteLine("\n" + content);
 
