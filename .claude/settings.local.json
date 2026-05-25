@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Read(//c/Users/Adam/source/repos/SWR-Unit-Tracker/**)"
+      "Read(//c/Users/Adam/source/repos/SWR-Unit-Tracker/**)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet run:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []

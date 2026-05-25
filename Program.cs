@@ -154,6 +154,38 @@ namespace SWR701Tracker
             return $" {ansiColor}{statusIndicator}{resetColor}";
         }
 
+        // ANSI colours used to highlight an entire cancellation line
+        const string ANSI_YELLOW = "[33m"; // partially cancelled (same as 1-4 min delay)
+        const string ANSI_RED = "[31m";    // fully cancelled
+        const string ANSI_RESET = "[0m";
+
+        // Wrap an entire line in a single ANSI colour. Strips any internal ANSI
+        // codes first so the whole line renders uniformly in the given colour.
+        static string ColorizeWholeLine(string text, string ansiColor)
+        {
+            const char esc = '';
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < text.Length; i++)
+            {
+                if (text[i] == esc)
+                {
+                    // Skip the ANSI SGR sequence (ends with 'm')
+                    while (i < text.Length && text[i] != 'm') i++;
+                    continue;
+                }
+                sb.Append(text[i]);
+            }
+            return $"{ansiColor}{sb}{ANSI_RESET}";
+        }
+
+        // Apply whole-line cancellation colouring: red if cancelled, yellow if partially cancelled
+        static string ApplyCancellationColor(string label, bool isCancelled, bool isPartiallyCancelled)
+        {
+            if (isCancelled) return ColorizeWholeLine(label, ANSI_RED);
+            if (isPartiallyCancelled) return ColorizeWholeLine(label, ANSI_YELLOW);
+            return label;
+        }
+
         // === 701s: one identity + possible reversal + status + last seen ===
         static async Task<(string unit, string status, string? headcode, string? identity, string? reversal, string statusIndicator, string statusColor, string lastSeenLocation, bool isCancelled, bool isPartiallyCancelled)>
         Check701Async(HttpClient client, string unitNumber)
@@ -464,6 +496,7 @@ namespace SWR701Tracker
                 var cancelStr = isCancelled ? " - Cancelled" : isPartiallyCancelled ? " - Partially cancelled" : "";
                 var part = $"{identityStr}{headcodeStr}{statusStr}{lastSeenStr}";
                 var label = string.IsNullOrEmpty(reversal) ? $"{part}{cancelStr}" : $"{part} – reverses at {reversal}{cancelStr}";
+                label = ApplyCancellationColor(label, isCancelled, isPartiallyCancelled);
 
                 if (status == "depot")
                     depot701.Add(label);
@@ -498,6 +531,7 @@ namespace SWR701Tracker
                 var label = string.IsNullOrEmpty(reversal)
                     ? $"{formation} ({headcode}){statusStr}{lastSeenStr}{cancelStr}"
                     : $"{formation} ({headcode}){statusStr}{lastSeenStr} – reverses at {reversal}{cancelStr}";
+                label = ApplyCancellationColor(label, isCancelled, isPartiallyCancelled);
 
                 if (status == "depot")
                     depot458.Add(label);
@@ -538,6 +572,7 @@ namespace SWR701Tracker
                 var label = string.IsNullOrEmpty(reversal)
                     ? $"{formation} ({headcode}){statusStr}{lastSeenStr}{cancelStr}"
                     : $"{formation} ({headcode}){statusStr}{lastSeenStr} – reverses at {reversal}{cancelStr}";
+                label = ApplyCancellationColor(label, isCancelled, isPartiallyCancelled);
 
                 if (status == "depot")
                     depot455.Add(label);
@@ -730,6 +765,7 @@ namespace SWR701Tracker
                 var label = string.IsNullOrEmpty(reversal)
                     ? $"{formation} ({headcode}){statusStr}{lastSeenStr}{cancelStr}"
                     : $"{formation} ({headcode}){statusStr}{lastSeenStr} – reverses at {reversal}{cancelStr}";
+                label = ApplyCancellationColor(label, isCancelled, isPartiallyCancelled);
 
                 if (status == "depot")
                     depot7015.Add(label);
@@ -797,7 +833,7 @@ namespace SWR701Tracker
                 }
             }
 
-            content += "\nPowered by SWR Unit Tracker v2.1.1\n```";
+            content += "\nPowered by SWR Unit Tracker v2.2.0\n```";
 
             Console.WriteLine("\n" + content);
 
