@@ -32,23 +32,8 @@ namespace SWR701Tracker
             {"1N", "Aldershot via Richmond"}, {"1D", "Dorking"}
         };
 
-        static readonly string[] ACTIVE_4585_UNITS = { "458530", "458533", "458535" };
+        static readonly string[] ACTIVE_4585_UNITS = { "458530", "458533" };
         static readonly string[] ACTIVE_7015_UNITS = Enumerable.Range(501, 30).Select(i => $"701{i}").ToArray();
-
-        // 455 fleet to monitor (9 units, as of February 2026)
-        static readonly string[] ACTIVE_455_UNITS = {
-            // 455/7 (6 units)
-            "455712", "455716", "455717", "455721", "455727", "455732",
-            // 455/8 (3 units)
-            "455870", "455871", "455873"
-        };
-
-        // Known baseline units for fleet total (9 units, as of February 2026)
-        static readonly HashSet<string> KNOWN_455_UNITS = new()
-        {
-            "455712", "455716", "455717", "455721", "455727", "455732",
-            "455870", "455871", "455873"
-        };
 
         static async Task Main(string[] args)
         {
@@ -66,15 +51,11 @@ namespace SWR701Tracker
             var tasks458 = ACTIVE_4585_UNITS.Select(u => Check458Async(client, u, seen)).ToArray();
             var results458 = await Task.WhenAll(tasks458);
 
-            var seen455 = new HashSet<string>();
-            var tasks455 = ACTIVE_455_UNITS.Select(u => Check458Async(client, u, seen455)).ToArray();
-            var results455 = await Task.WhenAll(tasks455);
-
             var seen7015 = new HashSet<string>();
             var tasks7015 = ACTIVE_7015_UNITS.Select(u => Check458Async(client, u, seen7015, is458: false)).ToArray();
             var results7015 = await Task.WhenAll(tasks7015);
 
-            await NotifyDiscord(nonNullableResults701, results458, results455, results7015);
+            await NotifyDiscord(nonNullableResults701, results458, results7015);
         }
 
         static string ClassifyUnit(string? headcode)
@@ -114,14 +95,6 @@ namespace SWR701Tracker
                 return runningNumber % 2 == 0 ? "⬆\uFE0F" : "⬇\uFE0F";
 
             return "•";
-        }
-
-        // Calculate dynamic 455 total: base known count + any unexpected units seen
-        static int GetDynamic455Total(IEnumerable<string> activeUnits)
-        {
-            int knownCount = KNOWN_455_UNITS.Count; // 12
-            int extraUnits = activeUnits.Count(u => !KNOWN_455_UNITS.Contains(u));
-            return knownCount + extraUnits;
         }
 
         static string GetAnsiColor(string statusColor)
@@ -479,7 +452,6 @@ namespace SWR701Tracker
         static async Task NotifyDiscord(
             (string unit, string status, string headcode, string identity, string reversal, string statusIndicator, string statusColor, string lastSeenLocation, bool isCancelled, bool isPartiallyCancelled)[] results701,
             (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor, string lastSeenLocation, bool isCancelled, bool isPartiallyCancelled)?[] results458,
-            (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor, string lastSeenLocation, bool isCancelled, bool isPartiallyCancelled)?[] results455,
             (string formation, string status, string headcode, string reversal, string statusIndicator, string statusColor, string lastSeenLocation, bool isCancelled, bool isPartiallyCancelled)?[] results7015)
         {
             var inService701 = new Dictionary<string, List<(string label, string headcode)>>();
@@ -550,57 +522,12 @@ namespace SWR701Tracker
                 }
             }
 
-            // Process 455 results
-            var inService455 = new Dictionary<string, HashSet<(string label, string headcode)>>();
-            var depot455 = new HashSet<string>();
-            var testing455 = new HashSet<string>();
-            var seenForm455 = new HashSet<string>();
-            var activeUnits455 = new List<string>();
-            foreach (var r in results455)
-            {
-                if (r == null) continue;
-                var (formation, status, headcode, reversal, statusIndicator, statusColor, lastSeenLocation, isCancelled, isPartiallyCancelled) = r.Value;
-                if (!seenForm455.Add(formation)) continue;
-
-                // Track all active units for dynamic total
-                foreach (var u in formation.Split('+'))
-                    activeUnits455.Add(u.Trim());
-
-                var statusStr = ColorizeStatus(statusIndicator, statusColor, isCancelled);
-                var lastSeenStr = !string.IsNullOrEmpty(lastSeenLocation) ? $" – last seen at {lastSeenLocation}" : "";
-                var cancelStr = isCancelled ? " - Cancelled" : isPartiallyCancelled ? " - Partially cancelled" : "";
-                var label = string.IsNullOrEmpty(reversal)
-                    ? $"{formation} ({headcode}){statusStr}{lastSeenStr}{cancelStr}"
-                    : $"{formation} ({headcode}){statusStr}{lastSeenStr} – reverses at {reversal}{cancelStr}";
-                label = ApplyCancellationColor(label, isCancelled, isPartiallyCancelled);
-
-                if (status == "depot")
-                    depot455.Add(label);
-                else if (status == "testing")
-                    testing455.Add(label);
-                else if (status == "in_service")
-                {
-                    var line = GetLineFromHeadcode(headcode);
-                    if (string.IsNullOrEmpty(line))
-                        depot455.Add(label);
-                    else
-                    {
-                        if (!inService455.ContainsKey(line)) inService455[line] = new HashSet<(string, string)>();
-                        inService455[line].Add((label, headcode));
-                    }
-                }
-            }
-
             var now = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
             int total701 = inService701.Values.Sum(v => v.Count) + depot701.Count + testing701.Count + other701.Count;
             // Count individual units by splitting formations on '+'
             int total458 = inService458.Values.Sum(v => v.Sum(f => f.label.Split(' ')[0].Split('+').Length)) +
                           depot458.Sum(f => f.Split(' ')[0].Split('+').Length) +
                           testing458.Sum(f => f.Split(' ')[0].Split('+').Length);
-            int total455 = inService455.Values.Sum(v => v.Sum(f => f.label.Split(' ')[0].Split('+').Length)) +
-                          depot455.Sum(f => f.Split(' ')[0].Split('+').Length) +
-                          testing455.Sum(f => f.Split(' ')[0].Split('+').Length);
-            int dynamic455Total = GetDynamic455Total(activeUnits455);
 
             var content = "```ansi\nSWR Fleet Report\n";
             content += $"701/0s: {total701}/60 units seen today — {now}\n\n";
@@ -648,7 +575,7 @@ namespace SWR701Tracker
             }
 
             // 458/5 section
-            content += $"458/5s: {total458}/3 units seen today\n";
+            content += $"458/5s: {total458}/2 units seen today\n";
             if (inService458.Any())
             {
                 var inService458Count = inService458.Values.Sum(v => v.Sum(f => f.label.Split(' ')[0].Split('+').Length));
@@ -686,48 +613,6 @@ namespace SWR701Tracker
                 content += "\n";
             }
             if (!inService458.Any() && !depot458.Any() && !testing458.Any())
-                content += "None running today.\n";
-            content += "\n";
-
-            // 455 section
-            content += $"455s: {total455}/{dynamic455Total} units seen today\n";
-            if (inService455.Any())
-            {
-                var inService455Count = inService455.Values.Sum(v => v.Sum(f => f.label.Split(' ')[0].Split('+').Length));
-                content += $"🟢 In service ({inService455Count}):\n";
-                foreach (var (line, labels) in inService455.OrderBy(x => x.Key))
-                {
-                    var lineUnitCount = labels.Sum(f => f.label.Split(' ')[0].Split('+').Length);
-                    content += $"{line} ({lineUnitCount}):\n";
-
-                    var normals = labels.Where(l => !l.label.Contains("reverses at")).ToList();
-                    var revs = labels.Where(l => l.label.Contains("reverses at")).ToList();
-
-                    foreach (var (label, headcode) in normals)
-                        content += $"{GetDirectionEmoji(headcode)} {label}\n";
-                    foreach (var (label, headcode) in revs)
-                        content += $"{GetDirectionEmoji(headcode)} {label}\n";
-
-                    content += "\n";
-                }
-            }
-            if (depot455.Any())
-            {
-                var depotUnitCount = depot455.Sum(f => f.Split(' ')[0].Split('+').Length);
-                content += $"🏠 Depot ({depotUnitCount}):\n";
-                foreach (var unit in depot455)
-                    content += $"• {unit}\n";
-                content += "\n";
-            }
-            if (testing455.Any())
-            {
-                var testingUnitCount = testing455.Sum(f => f.Split(' ')[0].Split('+').Length);
-                content += $"🛠️ Testing ({testingUnitCount}):\n";
-                foreach (var unit in testing455)
-                    content += $"• {unit}\n";
-                content += "\n";
-            }
-            if (!inService455.Any() && !depot455.Any() && !testing455.Any())
                 content += "None running today.\n";
             content += "\n";
 

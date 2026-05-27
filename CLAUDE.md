@@ -70,7 +70,7 @@ The application contains hardcoded mappings of 2-character headcodes to SWR rail
 
 ### Active Units
 - **Class 701**: Checks units 701001 through 701060 (60 units total)
-- **Class 458/5**: Only monitors predefined active units (458529, 458530, 458533, 458535, 458536)
+- **Class 458/5**: Only monitors predefined active units (458530, 458533)
 
 ## Automation
 
